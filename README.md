@@ -481,8 +481,7 @@ const counts = await queue.getJobCounts();
 //   active: 3,
 //   completed: 204,
 //   delayed: 5,
-//   dead: 1,
-//   failed: 0
+//   dead: 1
 // }
 ```
 
