@@ -819,3 +819,9 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 ## License
 
 MIT — [LICENSE](./LICENSE)
+
+# Donations
+
+## Buy me a coffee!
+
+BTC — ``12dxgVQ3sRFhc4g7M6oydsN2tTMMthJJqS``
