@@ -1,0 +1,43 @@
+# Source — consumers use the compiled dist/ only
+src/
+tests/
+
+# Config files not needed at runtime
+tsconfig*.json
+tsup.config.ts
+vitest.config.ts
+eslint.config.mjs
+.prettierrc.json
+.prettierignore
+.eslintignore
+.gitignore
+
+# Development scripts
+changelog.sh
+
+# CI / GitHub
+.github/
+.circleci/
+.travis.yml
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary
+tmp/
+temp/
+*.tsbuildinfo
+
+# Docs source (keep README.md, CHANGELOG.md, LICENSE — they are in the "files" list)
+docs/

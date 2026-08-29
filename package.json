@@ -1,0 +1,97 @@
+{
+  "name": "queue-jobs-worker",
+  "version": "1.0.0",
+  "description": "Reliable job queue and background worker system for Node.js with retries, concurrency, scheduling, and failure recovery.",
+  "keywords": [
+    "queue",
+    "job-queue",
+    "background-jobs",
+    "background-processing",
+    "worker",
+    "nodejs",
+    "retry",
+    "concurrency",
+    "scheduling",
+    "dlq",
+    "dead-letter-queue",
+    "redis",
+    "postgres",
+    "mysql",
+    "typescript"
+  ],
+  "homepage": "https://github.com/rafidahmed870/queue-jobs-worker#readme",
+  "bugs": {
+    "url": "https://github.com/rafidahmed870/queue-jobs-worker/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rafidahmed870/queue-jobs-worker.git"
+  },
+  "license": "MIT",
+  "author": "Rafid Ahmed",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.dts.json",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "redis": ">=4.0.0",
+    "pg": ">=8.0.0",
+    "mysql2": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "redis": { "optional": true },
+    "pg": { "optional": true },
+    "mysql2": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "@types/pg": "^8.23.1",
+    "@typescript-eslint/eslint-plugin": "*",
+    "@typescript-eslint/parser": "*",
+    "eslint": "*",
+    "eslint-config-prettier": "*",
+    "eslint-plugin-prettier": "*",
+    "mysql2": "^3.24.2",
+    "pg": "^8.23.0",
+    "prettier": "*",
+    "redis": "^6.2.1",
+    "tsup": "*",
+    "typescript": "*",
+    "vitest": "*"
+  }
+}
