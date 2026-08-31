@@ -360,9 +360,13 @@ export class MySQLStorageAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async releaseLock(jobId: string): Promise<void> {
+    // Set lock_expires_at to NOW(3) (already-expired) rather than NULL.
+    // recoverStalledJobs() uses WHERE lock_expires_at <= ? — NULL comparisons
+    // in SQL always evaluate to NULL (not true), so a NULL value would leave the
+    // job permanently stuck in active status.
     await this.pool.query(
       `UPDATE qjw_jobs
-       SET lock_id = NULL, lock_expires_at = NULL, updated_at = NOW(3)
+       SET lock_id = NULL, lock_expires_at = NOW(3), updated_at = NOW(3)
        WHERE id = ?`,
       [jobId],
     );

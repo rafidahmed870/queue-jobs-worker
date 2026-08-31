@@ -117,6 +117,73 @@ describe("Worker", () => {
     expect(worker.status).toBe("stopped");
   });
 
+  it("job released via releaseLock during shutdown is recovered by recoverStalledJobs", async () => {
+    // Regression test for: releaseLock() leaving jobs permanently stuck in
+    // "active" status because lockExpiresAt was set to null/empty, causing
+    // recoverStalledJobs() to skip them (issue #1).
+    //
+    // We test releaseLock() directly on the adapter rather than going through
+    // the full worker shutdown cycle, because executeJob() runs fire-and-forget
+    // and its finally{} block can race against the post-stop assertions.
+    const { InMemoryStorageAdapter } = await import("../src/storage/in-memory.adapter.js");
+    const adapter = new InMemoryStorageAdapter();
+    await adapter.initialize();
+
+    const enqueuedJob = await adapter.enqueue({
+      id: "test-release-job",
+      queue: "release-lock-test",
+      type: "long-task",
+      payload: {},
+      maxAttempts: 3,
+      retryDelay: 1000,
+      backoff: "exponential",
+      timeout: 30_000,
+      priority: 0,
+      runAt: new Date(Date.now() - 1).toISOString(),
+    });
+
+    // Claim it so it becomes active.
+    const claimed = await adapter.claim({
+      queue: "release-lock-test",
+      lockId: "worker-1",
+      lockDuration: 60_000,
+      now: new Date().toISOString(),
+    });
+    expect(claimed).not.toBeNull();
+    expect(claimed!.status).toBe("active");
+
+    // Simulate what worker.stop() does when shutdownTimeout elapses.
+    await adapter.releaseLock(enqueuedJob.id);
+
+    // --- Core assertions ---
+
+    // Job must remain "active" (not silently transitioned away).
+    const afterRelease = await adapter.getJob(enqueuedJob.id);
+    expect(afterRelease!.status).toBe("active");
+
+    // lockExpiresAt must be non-null AND already-expired so that
+    // recoverStalledJobs() can match it — NOT null or empty string.
+    expect(afterRelease!.lockExpiresAt).not.toBeNull();
+    expect(afterRelease!.lockExpiresAt).not.toBe("");
+    const lockExpiry = new Date(afterRelease!.lockExpiresAt!).getTime();
+    expect(lockExpiry).toBeLessThanOrEqual(Date.now());
+
+    // recoverStalledJobs() must reclaim the job.
+    const recovered = await adapter.recoverStalledJobs(
+      "release-lock-test",
+      new Date().toISOString(),
+    );
+    expect(recovered).toContain(enqueuedJob.id);
+
+    // After recovery the job must be back to "waiting" — reclaimable.
+    const afterRecovery = await adapter.getJob(enqueuedJob.id);
+    expect(afterRecovery!.status).toBe("waiting");
+    expect(afterRecovery!.lockId).toBeNull();
+    expect(afterRecovery!.lockExpiresAt).toBeNull();
+
+    await adapter.close();
+  });
+
   it("emits job:failed on processor error", async () => {
     client = new QueueClient({ defaults: { pollInterval: 50 } });
     const queue = client.createQueue("fail-event");
