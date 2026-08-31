@@ -394,10 +394,14 @@ export class RedisStorageAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async releaseLock(jobId: string): Promise<void> {
+    const now = new Date().toISOString();
+    // Set lockExpiresAt to now (already-expired) rather than clearing it to an
+    // empty string. recoverStalledJobs() skips entries where lockExpiresAt is
+    // falsy, so an empty string would leave the job permanently stuck.
     await this.client.hSet(k.job(jobId), {
       lockId: "",
-      lockExpiresAt: "",
-      updatedAt: new Date().toISOString(),
+      lockExpiresAt: now,
+      updatedAt: now,
     });
   }
 

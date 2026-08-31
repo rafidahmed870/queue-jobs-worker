@@ -208,10 +208,13 @@ export class InMemoryStorageAdapter implements StorageAdapter {
     const job = this.jobs.get(jobId);
     if (!job) return;
 
+    const now = new Date().toISOString();
     job.lockId = null;
-    job.lockExpiresAt = null;
-    // Keep the job as "active" so it will be recovered by stalled-job detection.
-    job.updatedAt = new Date().toISOString();
+    // Set lockExpiresAt to now (already-expired) so recoverStalledJobs() will
+    // immediately pick up the job — its lock-expired check requires a non-null,
+    // expired timestamp, not null.
+    job.lockExpiresAt = now;
+    job.updatedAt = now;
   }
 
   // -------------------------------------------------------------------------

@@ -6,6 +6,51 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.0.1] — 2026-08-31
+
+### Core
+
+### Fixed
+
+- **`Worker.stop()` — clarified `releaseLock()` behavior in shutdown comment** ([#1](https://github.com/rafidahmed870/queue-jobs-worker/issues/1))
+
+  The inline comment in `worker.ts` now correctly explains that `releaseLock()`
+  sets `lockExpiresAt` to an already-expired timestamp (not null/empty), so
+  `recoverStalledJobs()` on any worker will immediately reclaim the job on the
+  next stall-check cycle.
+
+---
+
+### Events
+
+### Added
+
+- `QueueEventEmitter` — strongly-typed lifecycle event bus shared across all components.
+- Emits events for the full job lifecycle: enqueued, started, completed, failed, retrying, dead, stalled.
+- All event payloads fully typed via `events.types.ts`.
+
+---
+
+<!-- Links -->
+[1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0
+
+### Storage
+
+### Fixed
+
+- **`releaseLock()` leaves jobs permanently stuck in `active` status** ([#1](https://github.com/rafidahmed870/queue-jobs-worker/issues/1))
+
+  All four adapters were clearing `lockExpiresAt` to `null` / empty string
+  while keeping `status` as `"active"`. Because `recoverStalledJobs()` requires
+  a non-null, already-expired `lockExpiresAt` to match a stalled job, those
+  jobs were silently skipped and could never be reclaimed or retried.
+
+  - `InMemoryStorageAdapter.releaseLock()` — `lockExpiresAt` now set to `new Date().toISOString()` instead of `null`.
+  - `RedisStorageAdapter.releaseLock()` — `lockExpiresAt` hash field now set to the current ISO timestamp instead of `""`.
+  - `PostgreSQLStorageAdapter.releaseLock()` — `lock_expires_at` column now set to `NOW()` instead of `NULL`.
+  - `MySQLStorageAdapter.releaseLock()` — `lock_expires_at` column now set to `NOW(3)` instead of `NULL`.
+
+---
 
 ## [1.0.0] — 2026-08-29
 
@@ -73,4 +118,5 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+[1.0.1]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0

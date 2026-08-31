@@ -348,9 +348,13 @@ export class PostgreSQLStorageAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async releaseLock(jobId: string): Promise<void> {
+    // Set lock_expires_at to NOW() (already-expired) rather than NULL.
+    // recoverStalledJobs() uses WHERE lock_expires_at <= $now — NULL comparisons
+    // in SQL always evaluate to NULL (not true), so a NULL value would leave the
+    // job permanently stuck in active status.
     await this.pool.query(
       `UPDATE qjw_jobs
-       SET lock_id = NULL, lock_expires_at = NULL, updated_at = NOW()
+       SET lock_id = NULL, lock_expires_at = NOW(), updated_at = NOW()
        WHERE id = $1`,
       [jobId],
     );

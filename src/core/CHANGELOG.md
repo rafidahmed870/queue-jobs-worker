@@ -4,6 +4,19 @@ Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, 
 
 ---
 
+## [1.0.1] — 2026-08-31
+
+### Fixed
+
+- **`Worker.stop()` — clarified `releaseLock()` behavior in shutdown comment** ([#1](https://github.com/rafidahmed870/queue-jobs-worker/issues/1))
+
+  The inline comment in `worker.ts` now correctly explains that `releaseLock()`
+  sets `lockExpiresAt` to an already-expired timestamp (not null/empty), so
+  `recoverStalledJobs()` on any worker will immediately reclaim the job on the
+  next stall-check cycle.
+
+---
+
 ## [1.0.0] — 2026-08-29
 
 ### Added
@@ -34,4 +47,5 @@ Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, 
 ---
 
 <!-- Links -->
+[1.0.1]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0

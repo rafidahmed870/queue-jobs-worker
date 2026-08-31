@@ -1,6 +1,6 @@
 {
   "name": "queue-jobs-worker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Reliable job queue and background worker system for Node.js with retries, concurrency, scheduling, and failure recovery.",
   "keywords": [
     "queue",

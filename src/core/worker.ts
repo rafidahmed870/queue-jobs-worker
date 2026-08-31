@@ -151,7 +151,11 @@ export class Worker {
     }
 
     // Release locks for any jobs that did not finish in time.
-    // This lets other workers reclaim them instead of waiting for lock expiry.
+    // releaseLock() sets lockExpiresAt to an already-expired timestamp so that
+    // recoverStalledJobs() on any worker will immediately pick them up and
+    // return them to "waiting" — rather than leaving them stuck in "active"
+    // forever (which would happen if lockExpiresAt were cleared to null/empty,
+    // since every adapter's stalled-job check requires a non-null expired value).
     if (this.activeJobIds.size > 0) {
       await Promise.all(
         Array.from(this.activeJobIds).map((jobId) =>
