@@ -820,8 +820,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 MIT — [LICENSE](./LICENSE)
 
-# Donations
+## Donation
 
-## Buy me a coffee!
+If you find this project useful, you can support me with a coffee.
 
-BTC — ``12dxgVQ3sRFhc4g7M6oydsN2tTMMthJJqS``
+**BTC:** `12dxgVQ3sRFhc4g7M6oydsN2tTMMthJJqS`
