@@ -208,17 +208,9 @@ export class Worker {
   private async claimNext(): Promise<boolean> {
     const now = new Date().toISOString();
 
-    // Rate-limit check (if configured).
-    if (this.config.rateLimit) {
-      const allowed = await this.storage.checkAndIncrementRateLimit(
-        this.queueName,
-        this.config.rateLimit.max,
-        this.config.rateLimit.duration,
-        now,
-      );
-      if (!allowed) return false;
-    }
-
+    // Attempt to claim a job before touching the rate-limit counter.
+    // The counter must only be consumed when a job is actually claimed for
+    // processing — polling an empty queue must not burn quota (issue #4).
     const raw = await this.storage.claim({
       queue: this.queueName,
       lockId: this.id,
@@ -227,6 +219,22 @@ export class Worker {
     });
 
     if (!raw) return false;
+
+    // A job was claimed. Now enforce the rate limit.  If the limit has been
+    // reached we immediately release the lock so the job is recoverable and
+    // return false — the poll loop will stop trying until the next cycle.
+    if (this.config.rateLimit) {
+      const allowed = await this.storage.checkAndIncrementRateLimit(
+        this.queueName,
+        this.config.rateLimit.max,
+        this.config.rateLimit.duration,
+        now,
+      );
+      if (!allowed) {
+        await this.storage.releaseLock(raw.id);
+        return false;
+      }
+    }
 
     const job = new Job(raw);
     this.activeCount += 1;
