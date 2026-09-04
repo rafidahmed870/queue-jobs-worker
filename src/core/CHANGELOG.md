@@ -4,6 +4,23 @@ Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, 
 
 ---
 
+## [1.0.2] — 2026-09-04
+
+### Fixed
+
+- **`Worker` — rate-limit quota no longer consumed on empty-queue polls** ([#4](https://github.com/rafidahmed870/queue-jobs-worker/issues/4))
+
+  `claimNext()` previously called `checkAndIncrementRateLimit()` before
+  attempting to claim a job. This meant every poll cycle against an empty queue
+  burned a quota slot, potentially exhausting the configured window budget
+  before any real work was done. After the fix, the storage `claim()` call
+  happens first; the rate-limit counter is only incremented when a job is
+  actually claimed for processing. If the rate limit is reached at that point
+  the lock is immediately released via `releaseLock()` so the job remains
+  reclaimable on the next window.
+
+---
+
 ## [1.0.1] — 2026-08-31
 
 ### Fixed
@@ -47,5 +64,6 @@ Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, 
 ---
 
 <!-- Links -->
+[1.0.2]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0

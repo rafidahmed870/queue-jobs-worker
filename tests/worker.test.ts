@@ -184,6 +184,48 @@ describe("Worker", () => {
     await adapter.close();
   });
 
+  it("rate limit quota is not consumed when the queue is empty", async () => {
+    // Regression test for: rate-limit counter incremented on every poll cycle
+    // even when no jobs are available, exhausting the quota before any real
+    // work is done (issue #4).
+    //
+    // Strategy: configure a limit of 2 jobs per 10-second window and let the
+    // worker poll an empty queue several times.  Then enqueue 2 jobs and
+    // verify both are processed — if the bug were present the quota would
+    // already be exhausted and neither job would run.
+    const { InMemoryStorageAdapter } = await import("../src/storage/in-memory.adapter.js");
+    const adapter = new InMemoryStorageAdapter();
+    await adapter.initialize();
+
+    client = new QueueClient({
+      adapter,
+      defaults: { pollInterval: 30 },
+    });
+
+    const queue = client.createQueue("rate-limit-empty-test", {
+      rateLimit: { max: 2, duration: 10_000 },
+    });
+
+    const processed = vi.fn();
+    queue.process("task", async () => {
+      processed();
+    });
+
+    // Start the worker with an empty queue and let it poll several times,
+    // which would exhaust the quota under the old (buggy) implementation.
+    const worker = queue.createWorker({ concurrency: 2 });
+    await sleep(200); // ~6 poll cycles with no jobs
+
+    // Now add 2 jobs — both should be processed within the same rate-limit
+    // window because no quota was consumed during the empty polls.
+    await queue.enqueue("task", {});
+    await queue.enqueue("task", {});
+    await sleep(300);
+
+    expect(processed).toHaveBeenCalledTimes(2);
+    await worker.stop();
+  });
+
   it("emits job:failed on processor error", async () => {
     client = new QueueClient({ defaults: { pollInterval: 50 } });
     const queue = client.createQueue("fail-event");
