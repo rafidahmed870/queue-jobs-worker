@@ -4,9 +4,32 @@ Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, 
 
 ---
 
-## [1.0.2] — 2026-09-04
+## [1.0.2] — 2026-09-05
 
 ### Fixed
+
+- **`Worker` — croner added as a required dependency; invalid expressions no longer fall back to a 1-minute interval** ([#5](https://github.com/rafidahmed870/queue-jobs-worker/issues/5))
+
+  `enqueueCronNext()` previously attempted a dynamic `import("croner")` inside
+  a try/catch. If the import failed — or if the resolved `Cron` class was not a
+  function — the code silently fell back to `Date.now() + 60_000`, scheduling
+  the next run 60 seconds later regardless of the configured cron expression.
+  The same silent fallback was also triggered for invalid cron expressions that
+  caused the `Cron` constructor to throw.
+
+  After the fix:
+
+  - `croner` is now declared as a proper `dependency` in `package.json`
+    (`^10.0.1`) and imported statically, so it is always available without any
+    dynamic-import dance.
+  - If the `Cron` constructor throws (invalid expression), a descriptive
+    `worker:error` event is emitted and re-enqueue is skipped. The worker
+    remains running.
+  - If `cronInstance.nextRun()` returns `null` (the schedule has no future
+    occurrences), a `worker:error` is emitted and re-enqueue is skipped. Again,
+    the worker keeps running.
+  - The 1-minute fallback path has been removed entirely — there is no silent
+    fallback under any failure condition.
 
 - **`Worker` — rate-limit quota no longer consumed on empty-queue polls** ([#4](https://github.com/rafidahmed870/queue-jobs-worker/issues/4))
 
