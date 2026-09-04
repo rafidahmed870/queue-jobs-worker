@@ -41,3 +41,6 @@ temp/
 
 # Docs source (keep README.md, CHANGELOG.md, LICENSE — they are in the "files" list)
 docs/
+
+.github
+.husky

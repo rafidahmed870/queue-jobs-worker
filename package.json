@@ -64,20 +64,27 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run typecheck && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run build",
+    "prepare": "husky"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "peerDependencies": {
-    "redis": ">=4.0.0",
+    "mysql2": ">=3.0.0",
     "pg": ">=8.0.0",
-    "mysql2": ">=3.0.0"
+    "redis": ">=4.0.0"
   },
   "peerDependenciesMeta": {
-    "redis": { "optional": true },
-    "pg": { "optional": true },
-    "mysql2": { "optional": true }
+    "redis": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "mysql2": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "*",
@@ -87,6 +94,7 @@
     "eslint": "*",
     "eslint-config-prettier": "*",
     "eslint-plugin-prettier": "*",
+    "husky": "^9.1.7",
     "mysql2": "^3.24.2",
     "pg": "^8.23.0",
     "prettier": "*",
