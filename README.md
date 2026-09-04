@@ -12,6 +12,8 @@ A production-ready background job queue for Node.js — persistent, reliable, an
 
 `queue-jobs-worker` lets you push work into a persistent queue and process it in the background — outside the main request lifecycle. You define the processor; the library handles everything else: queueing, persistence, retries, scheduling, concurrency, and failure recovery.
 
+For a full breakdown of every feature, see [FEATURES.md](./FEATURES.md).
+
 **Supports:**
 - In-memory (dev / testing)
 - Redis (node-redis v4+)
@@ -374,29 +376,7 @@ queue.process("send-push", async (job) => {
 });
 ```
 
-The `job` object exposes:
-
-```js
-job.id                // unique stable ID
-job.type              // job type string
-job.data              // your payload (never logged)
-job.attemptsMade      // attempts already executed
-job.maxAttempts       // maximum allowed
-job.attemptsRemaining
-job.attemptHistory    // array of past attempt records
-job.status            // current status
-job.priority
-job.runAt
-job.createdAt
-job.updatedAt
-
-// helpers
-job.isActive()
-job.isCompleted()
-job.isWaiting()
-job.isDelayed()
-job.isDead()
-```
+For the full list of `job` fields and helper methods, see [FEATURES.md → Job Identity & Metadata](./FEATURES.md#job-identity--metadata).
 
 ---
 
@@ -429,34 +409,16 @@ const w2 = queue.createWorker({ concurrency: 5 });
 All lifecycle events are emitted on the client. Subscribe before creating queues/workers:
 
 ```js
-// Job events
-client.on("job:enqueued",  (job) => console.log("Enqueued:", job.id));
-client.on("job:started",   (job) => console.log("Started:", job.id));
 client.on("job:completed", (job) => console.log("Done:", job.id));
 client.on("job:failed",    (job, err) => console.error("Failed:", job.id, err.message));
-client.on("job:retrying",  (job, err, nextRunAt) => {
-  console.log(`Retrying ${job.id} at ${nextRunAt}`);
-});
 client.on("job:dead",      (job, err) => console.error("DLQ:", job.id, err.message));
-client.on("job:stalled",   (jobId) => console.warn("Stalled:", jobId));
-client.on("job:recovered", (jobId) => console.log("Recovered:", jobId));
+client.on("worker:error",  (workerId, err) => console.error("Worker error:", err));
 
-// Worker events
-client.on("worker:started", (workerId) => console.log("Worker started:", workerId));
-client.on("worker:stopped", (workerId) => console.log("Worker stopped:", workerId));
-client.on("worker:status",  (workerId, status) => console.log(workerId, "→", status));
-client.on("worker:error",   (workerId, err) => console.error("Worker error:", err));
-
-// Queue / system errors
-client.on("queue:error", (queueName, err) => console.error("Queue error:", queueName, err));
-client.on("error",       (err) => console.error("Error:", err));
-
-// Remove a listener
-client.off("job:completed", myListener);
-
-// One-time listener
-client.once("job:dead", (job, err) => alertTeam(job, err));
+client.off("job:completed", myListener);  // remove a listener
+client.once("job:dead", (job, err) => alertTeam(job, err));  // one-time listener
 ```
+
+For the full event reference (all job, worker, and system events), see [FEATURES.md → Event System](./FEATURES.md#event-system).
 
 ---
 
@@ -507,44 +469,24 @@ await queue.enqueue("task", payload, {
 });
 ```
 
-**Backoff strategies:**
-
-| Strategy | Formula | Example (base = 1 s) |
-|---|---|---|
-| `fixed` | `baseDelay` | 1 s, 1 s, 1 s |
-| `linear` | `baseDelay × attempt` | 1 s, 2 s, 3 s |
-| `exponential` | `baseDelay × 2^(attempt-1)` (max 10 min) | 1 s, 2 s, 4 s, 8 s |
-
-Each failed attempt is recorded in `job.attemptHistory`:
-
-```js
-job.attemptHistory.forEach((attempt) => {
-  console.log(`Attempt ${attempt.attempt}: ${attempt.error}`);
-});
-```
+Three strategies are available: `fixed`, `linear`, and `exponential`. Each failed attempt is recorded in `job.attemptHistory`. See [FEATURES.md → Retry & Backoff](./FEATURES.md#retry--backoff) for strategy formulas and details.
 
 ---
 
 ## Scheduling
 
 ```js
-// Run 30 seconds from now
-await queue.enqueue("reminder", payload, {
-  schedule: { delay: 30_000 },
-});
+// Relative delay
+await queue.enqueue("reminder", payload, { schedule: { delay: 30_000 } });
 
-// Run at a specific time
-await queue.enqueue("report", payload, {
-  schedule: { runAt: "2026-09-01T09:00:00Z" },
-});
+// Absolute timestamp
+await queue.enqueue("report", payload, { schedule: { runAt: "2026-09-01T09:00:00Z" } });
 
-// Store a cron expression (integration point for recurring jobs)
-await queue.enqueue("cleanup", payload, {
-  schedule: { cron: "0 3 * * *" },
-});
+// Cron expression (stored for recurring jobs)
+await queue.enqueue("cleanup", payload, { schedule: { cron: "0 3 * * *" } });
 ```
 
-Delayed jobs are not eligible until their `runAt` time. The Redis adapter promotes them automatically inside the Lua claim script; SQL adapters check `run_at` in the `WHERE` clause.
+Delayed jobs are not eligible until their `runAt` time. See [FEATURES.md → Scheduling](./FEATURES.md#scheduling) for details on how each adapter handles promotion.
 
 ---
 
@@ -556,34 +498,22 @@ Higher values are processed first. Default is `0`.
 await queue.enqueue("urgent-task", payload, { priority: 100 });
 await queue.enqueue("normal-task", payload, { priority: 0 });
 await queue.enqueue("low-task",    payload, { priority: -10 });
-
 // Processing order: urgent → normal → low
 ```
+
+See [FEATURES.md → Priority](./FEATURES.md#priority).
 
 ---
 
 ## Rate Limiting
 
-Limit how many jobs are processed per time window:
-
 ```js
-// Queue-level rate limit
 const queue = client.createQueue("webhooks", {
-  rateLimit: {
-    max: 50,          // max 50 jobs
-    duration: 60_000, // per 60 seconds
-  },
-});
-
-// Or as a client default
-const client = new QueueClient({
-  defaults: {
-    rateLimit: { max: 100, duration: 60_000 },
-  },
+  rateLimit: { max: 50, duration: 60_000 }, // 50 jobs per minute
 });
 ```
 
-When the limit is reached, workers skip claiming until the window resets. Jobs stay in the queue and are not lost.
+When the limit is reached, workers skip claiming until the window resets — jobs are never discarded. See [FEATURES.md → Rate Limiting](./FEATURES.md#rate-limiting).
 
 ---
 
@@ -593,25 +523,13 @@ When a job exhausts all retry attempts it is moved to the DLQ (status: `"dead"`)
 
 ```js
 client.on("job:dead", async (job, error) => {
-  await alertOncall({
-    jobId: job.id,
-    type: job.type,
-    error: error.message,
-    attempts: job.attemptsMade,
-  });
+  await alertOncall({ jobId: job.id, type: job.type, error: error.message });
 });
 
-// Query dead jobs
 const deadJobs = await queue.getJobs("dead");
-
-// Inspect a dead job's full attempt history
-const job = await queue.getJob(jobId);
-if (job) {
-  job.attemptHistory.forEach((a) => {
-    console.log(`Attempt ${a.attempt} failed: ${a.error}`);
-  });
-}
 ```
+
+Full attempt history is preserved on the job. See [FEATURES.md → Dead Letter Queue](./FEATURES.md#dead-letter-queue).
 
 ---
 
@@ -620,21 +538,17 @@ if (job) {
 Always call `client.close()` before your process exits:
 
 ```js
-async function shutdown() {
-  await client.close(); // stops workers, releases locks, closes DB connections
+process.on("SIGTERM", async () => {
+  await client.close(); // stops workers, releases locks, closes connections
   process.exit(0);
-}
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT",  shutdown);
+});
+process.on("SIGINT", async () => {
+  await client.close();
+  process.exit(0);
+});
 ```
 
-During shutdown each worker:
-1. Stops polling for new jobs
-2. Waits up to `shutdownTimeout` (default 30 s) for active jobs to finish
-3. Releases DB/Redis connections
-
-Interrupted jobs remain recoverable — the stalled-job recovery mechanism will reclaim them on the next startup.
+Interrupted jobs remain recoverable via the stalled-job recovery mechanism. See [FEATURES.md → Graceful Shutdown](./FEATURES.md#graceful-shutdown).
 
 ---
 

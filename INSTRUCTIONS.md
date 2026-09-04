@@ -135,16 +135,7 @@ Before optimizing:
 
 ## 10. Documentation
 
-Update documentation when changes affect:
-
-* Public APIs
-* Configuration
-* Supported storage
-* Job lifecycle
-* Retry behavior
-* Worker behavior
-* Architecture
-* Security
+Update documentation when changes affect the public API, configuration, supported storage, job lifecycle, retry behavior, worker behavior, architecture, or security. When in doubt, check [FEATURES.md](./FEATURES.md) to see if that document needs updating too.
 
 Significant architectural decisions should have an ADR.
 

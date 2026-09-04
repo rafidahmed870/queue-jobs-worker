@@ -43,76 +43,11 @@ Storage implementations are responsible for persistence, atomic queue operations
 
 ---
 
-## Queue Architecture
-
-The queue layer consists of:
-
-* **QueueClient** — Client configuration and queue management.
-* **Queue** — Independent job stream and queue configuration.
-* **Job** — Unit of background work and lifecycle state.
-* **Worker** — Job claiming and processor execution.
-* **Processor** — User-defined job logic.
-* **Storage Adapter** — Storage abstraction.
-* **Dead Letter Queue** — Permanently failed jobs.
-
----
-
-## Reliability
-
-Reliability mechanisms are implemented at the queue and worker layers:
-
-* Persistent job state
-* Atomic job claiming
-* Distributed locking
-* Retry and backoff
-* Job timeout
-* Stalled-job recovery
-* Dead Letter Queue
-* Graceful worker shutdown
-
----
-
-## Scheduling & Control
-
-The system supports:
-
-* Delayed jobs
-* Scheduled jobs
-* Recurring jobs
-* Job priority
-* Concurrency limits
-* Rate limiting
-
-These features are configurable through the client, queue, worker, or job where applicable.
-
----
-
 ## API Design
 
-The public API is designed around a small set of primary abstractions:
+The public API is designed around a small set of primary abstractions: `QueueClient`, `Queue`, `Job`, `Worker`, `Processor`, and `StorageAdapter`.
 
-```ts
-QueueClient
-Queue
-Job
-Worker
-Processor
-StorageAdapter
-```
-
-Configuration follows a layered model:
-
-```text
-Client Defaults
-      ↓
-Queue Configuration
-      ↓
-Worker Configuration
-      ↓
-Job Configuration
-```
-
-More specific configuration overrides broader defaults where supported.
+For the full feature set (reliability mechanisms, scheduling, priority, rate limiting, concurrency, DLQ, events) see [FEATURES.md](./FEATURES.md). For component responsibilities and architecture diagrams see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 

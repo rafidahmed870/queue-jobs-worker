@@ -81,19 +81,7 @@ All contributions and architectural changes should follow these rules.
 
 ## 8. Configuration
 
-Configuration should follow this precedence:
-
-```text
-Client Defaults
-      ↓
-Queue Configuration
-      ↓
-Worker Configuration
-      ↓
-Job Configuration
-```
-
-More specific configuration overrides broader defaults where supported.
+Configuration follows a layered precedence — more specific settings override broader defaults where supported. See [FEATURES.md → Layered Configuration](./FEATURES.md#layered-configuration).
 
 ---
 

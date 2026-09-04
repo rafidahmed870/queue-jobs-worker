@@ -6,18 +6,9 @@
 
 It enables applications to execute asynchronous, time-consuming, or resource-intensive tasks outside the main request lifecycle using persistent queues and dedicated workers.
 
-The package provides:
-
-* Multiple independent queues
-* User-defined job processors
-* Worker-based job execution
-* Concurrency control
-* Retry and failure handling
-* Delayed, scheduled, and recurring jobs
-* Priority and rate limiting
-* Worker lifecycle management
-
 It is suitable for workloads such as email delivery, notifications, webhooks, file processing, media processing, report generation, and other asynchronous operations.
+
+For a full feature reference, see [FEATURES.md](./FEATURES.md).
 
 The package does not implement business logic. Users provide job processors, while **QUEUE-JOBS-WORKER** manages queueing, persistence, execution, reliability, and worker lifecycle.
 
@@ -25,41 +16,11 @@ The package does not implement business logic. Users provide job processors, whi
 
 ## Goals & Requirements
 
-### Goals
+The primary goal is to provide reliable, fault-tolerant, scalable, and developer-friendly background job processing with an infrastructure-independent architecture.
 
-The primary goal is to provide reliable, fault-tolerant, scalable, and developer-friendly background job processing.
+Key design properties: **reliability · consistency · safety · scalability · maintainability**.
 
-* Reliability and durability
-* Multiple queue and worker support
-* Configurable concurrency and resource control
-* Retry and failure recovery
-* Simple and extensible API
-* Infrastructure-independent architecture
-
-### Functional Requirements
-
-* Multiple independent queues
-* Job creation and lifecycle management
-* User-defined processors
-* Multiple job types
-* Concurrent job processing
-* Independent workers with configurable concurrency
-* Retry and backoff handling
-* Delayed, scheduled, and recurring jobs
-* Priority and rate limiting
-* Stalled-job detection and recovery
-* Job and worker events
-* Graceful worker shutdown
-
-### Non-Functional Requirements
-
-* Durable and consistent job state
-* Safe concurrent execution
-* Fault recovery
-* Efficient resource usage
-* Strong TypeScript support
-* Modular architecture
-* Secure-by-default design
+For the full feature set that satisfies these goals, see [FEATURES.md](./FEATURES.md).
 
 ---
 
@@ -162,30 +123,17 @@ The **QueueClient** is the primary entry point for configuring and interacting w
 const client = new QueueClient({
   dialect: "redis",
   connectionString: "...",
-
   defaults: {
     attempts: 3,
     retryDelay: 1000,
     timeout: 30000,
     concurrency: 10,
-
-    rateLimit: {
-      max: 100,
-      duration: 60000,
-    },
+    rateLimit: { max: 100, duration: 60000 },
   },
 });
 ```
 
-Default options may include:
-
-* **`attempts`** — Maximum processing attempts for a job.
-* **`retryDelay`** — Delay before a failed job is requeued.
-* **`timeout`** — Maximum execution time allowed for one attempt.
-* **`concurrency`** — Maximum number of jobs processed concurrently.
-* **`rateLimit`** — Maximum number of processing operations allowed within a configured time window.
-
-Queue-level and job-level configuration may override applicable defaults.
+Configuration follows a layered hierarchy: client defaults → queue options → worker options → job options. See [FEATURES.md → Layered Configuration](./FEATURES.md#layered-configuration).
 
 ### Queue Access
 
@@ -242,40 +190,15 @@ const emails = client.createQueue("emails", {
 
 ## Job
 
-A **Job** represents a single unit of background work.
-
-A job contains the information required to identify, execute, track, retry, and recover the work.
-
-### Job Data
-
-A job may contain:
-
-* Unique job ID
-* Queue name
-* Job type
-* Payload
-* Status
-* Attempt information
-* Retry configuration
-* Priority
-* Scheduling information
-* Timeout
-* Failure history
-* Lifecycle timestamps
-
-Example:
+A **Job** represents a single unit of background work containing everything needed to identify, execute, track, retry, and recover it.
 
 ```ts
-await emails.enqueue("send-email", {
-  to: "user@example.com",
-});
+await emails.enqueue("send-email", { to: "user@example.com" });
 ```
 
 ### Job Identity
 
-A job retains the same unique identity throughout its lifecycle.
-
-Retrying or recovering a job does not create a new job identity.
+A job retains the same unique identity throughout its lifecycle. Retrying or recovering a job does not create a new job identity.
 
 ```text
 job_123
@@ -285,7 +208,7 @@ job_123
   └── Attempt 3
 ```
 
-Failed attempts are retained in the job's execution history.
+Failed attempts are retained in the job's execution history. For the full `JobData` field reference, see [FEATURES.md → Job Identity & Metadata](./FEATURES.md#job-identity--metadata).
 
 ---
 
@@ -374,27 +297,7 @@ Active
       └──────► Active
 ```
 
-### Requeue
-
-A retryable job is returned to the queue as the **same job**, preserving its ID and failure history.
-
-```text
-Job A
- │
- ├── Attempt 1 → Failed
- ├── Requeue
- ├── Attempt 2 → Failed
- ├── Requeue
- └── Attempt 3 → Success
-```
-
-The requeued job follows the configured delay, priority, scheduling, and ordering rules.
-
-### Dead Letter Queue
-
-When a job exhausts its configured retry attempts, it is moved to the **Dead Letter Queue (DLQ)**.
-
-The DLQ preserves permanently failed jobs for inspection or recovery.
+A retryable job returns to the queue as the **same job**, preserving its ID and failure history. When all attempts are exhausted it moves to the **Dead Letter Queue (DLQ)**. See [FEATURES.md → Job Lifecycle](./FEATURES.md#job-lifecycle) and [FEATURES.md → Dead Letter Queue](./FEATURES.md#dead-letter-queue).
 
 ---
 
@@ -454,17 +357,7 @@ Expired locks must be recoverable after worker failure.
 
 ## Retry
 
-The **Retry** system controls how failed jobs are attempted again.
-
-A retryable failure requeues the existing job instead of creating a new one.
-
-### Retry Configuration
-
-Retry behavior may include:
-
-* Maximum attempts
-* Retry delay
-* Backoff strategy
+The **Retry** system controls how failed jobs are reattempted. A retryable failure requeues the existing job instead of creating a new one.
 
 ```text
 Attempt
@@ -479,17 +372,13 @@ Retry Delay / Backoff
 Requeue
 ```
 
-Each failed attempt is recorded in the job's failure history.
-
-When no attempts remain, the job is moved to the **DLQ**.
+Each failed attempt is recorded in the job's failure history. When no attempts remain, the job moves to the DLQ. See [FEATURES.md → Retry & Backoff](./FEATURES.md#retry--backoff).
 
 ---
 
 ## Failure Recovery
 
 The **Failure Recovery** system handles jobs interrupted by worker or infrastructure failures.
-
-An active job whose worker becomes unavailable must be detected and recovered.
 
 ```text
 Worker
@@ -506,27 +395,13 @@ Worker
        Requeue
 ```
 
-### Responsibilities
-
-* Detect stalled or abandoned jobs.
-* Recover expired locks.
-* Return recoverable jobs to the queue.
-* Preserve execution history.
-* Respect the configured retry policy.
-
-Recovery may result in another processing attempt, consistent with the system's at-least-once delivery model.
+Recovered jobs are reattempted consistent with the at-least-once delivery model. See [FEATURES.md → Stalled-Job Recovery](./FEATURES.md#stalled-job-recovery).
 
 ---
 
 ## Scheduling
 
-The **Scheduling** system controls when jobs become eligible for processing.
-
-### Supported Scheduling
-
-* **Delayed Jobs** — Become available after a specified delay.
-* **Scheduled Jobs** — Become available at a specific time.
-* **Recurring Jobs** — Repeat according to a configured schedule.
+The **Scheduling** system controls when jobs become eligible for processing (delayed, scheduled at an absolute time, or recurring via cron).
 
 ```text
 Create
@@ -544,76 +419,29 @@ Queue
 Worker
 ```
 
-Jobs must not become eligible for processing before their scheduled execution time.
+Jobs must not become eligible before their scheduled execution time. See [FEATURES.md → Scheduling](./FEATURES.md#scheduling).
 
 ---
 
 ## Priority & Rate Limiting
 
-### Priority
+**Priority** determines processing order — higher-priority jobs are selected first when multiple jobs are eligible.
 
-Priority determines the processing order of eligible jobs.
+**Rate limiting** restricts the number of jobs processed within a defined time window. When the limit is reached, eligible jobs stay queued until the window resets.
 
-Higher-priority jobs are selected before lower-priority jobs when both are ready.
-
-```text
-Queue
-├── Job A → Priority 10
-├── Job B → Priority 2
-└── Job C → Priority 5
-
-Order:
-A → C → B
-```
-
-Priority must remain consistent with scheduling and queue ordering rules.
-
-### Rate Limiting
-
-Rate limiting restricts the number of jobs processed within a defined time window.
-
-```ts
-rateLimit: {
-  max: 100,
-  duration: 60000,
-}
-```
-
-This configuration allows up to **100 processing operations per 60 seconds** within the configured rate-limit scope.
-
-When the limit is reached, eligible jobs remain queued until processing becomes available.
-
-Rate limits may be configured as defaults and overridden at supported scopes.
+See [FEATURES.md → Priority](./FEATURES.md#priority) and [FEATURES.md → Rate Limiting](./FEATURES.md#rate-limiting).
 
 ---
 
 ## Events
 
-The **Events** system exposes lifecycle events for jobs and workers.
-
-Supported events may include:
-
-* Job queued, started, completed, failed, retried, and moved to DLQ
-* Worker started, stopped, and errored
-* Queue lifecycle events
-
-Events allow applications to integrate their own logging and observability systems.
+The **Events** system exposes lifecycle events for jobs and workers, allowing applications to integrate their own logging and observability. See [FEATURES.md → Event System](./FEATURES.md#event-system).
 
 ---
 
 ## Concurrency
 
-The **Concurrency** system controls the number of jobs processed simultaneously.
-
-Concurrency may be configured through client defaults and overridden at queue or worker level.
-
-```ts
-const worker = queue.createWorker({
-  concurrency: 10,
-});
-```
-
-Concurrent workers must coordinate through the storage and locking mechanisms to prevent duplicate job ownership.
+Concurrency controls the number of jobs processed simultaneously and may be configured at client, queue, or worker level. Concurrent workers coordinate through the storage and locking mechanisms to prevent duplicate job ownership. See [FEATURES.md → Workers & Concurrency](./FEATURES.md#workers--concurrency).
 
 ---
 
@@ -636,64 +464,25 @@ Infrastructure and process-level scaling remain the responsibility of the deploy
 
 ## Graceful Shutdown
 
-Workers must support graceful shutdown.
-
-During shutdown, a worker should:
-
-1. Stop claiming new jobs.
-2. Allow active jobs to finish within configured limits.
-3. Release required resources and locks.
-4. Exit cleanly.
-
-Interrupted jobs remain recoverable according to the failure-recovery policy.
+Workers must support graceful shutdown: stop claiming new jobs, allow active jobs to finish within configured limits, release locks, and exit cleanly. Interrupted jobs remain recoverable via the failure-recovery system. See [FEATURES.md → Graceful Shutdown](./FEATURES.md#graceful-shutdown).
 
 ---
 
 ## Monitoring
 
-The package exposes queue, job, worker states, and lifecycle events that applications may use for observability.
-
-Available information may include:
-
-* Queue and job states
-* Worker state
-* Processing and failure information
-* Retry and DLQ information
-
-External monitoring infrastructure is outside the package's core responsibility.
+The package exposes queue, job, and worker states through events and query APIs that applications may use for observability. External monitoring infrastructure is outside the package's core responsibility. See [FEATURES.md → Event System](./FEATURES.md#event-system) and [FEATURES.md → Job Querying](./FEATURES.md#job-querying).
 
 ---
 
 ## Security
 
-The package follows a secure-by-default approach.
-
-Key considerations include:
-
-* Secure storage connections
-* Secure credential handling
-* Job payload validation
-* Controlled queue access
-* Safe handling of processor errors
-* Avoiding sensitive data in logs and failure history
-
-Processor execution isolation is the responsibility of the deployment environment when untrusted code or workloads are involved.
+The package follows a secure-by-default approach: payloads are never logged, credentials stay in environment variables, and sensitive data is kept out of errors. Processor execution isolation is the responsibility of the deployment environment. See [FEATURES.md → Security Defaults](./FEATURES.md#security-defaults) and [SECURITY.md](./SECURITY.md).
 
 ---
 
 ## Extensibility
 
-The architecture is built around modular and replaceable components.
-
-Primary extension points include:
-
-* Storage adapters
-* Retry and backoff strategies
-* Scheduling mechanisms
-* Queue and worker configuration
-* Event integrations
-
-Extensions should not require changes to the core queue-processing model.
+The architecture is built around modular and replaceable components. Primary extension points are storage adapters, retry/backoff strategies, scheduling mechanisms, and event integrations. Extensions should not require changes to the core queue-processing model.
 
 ---
 
