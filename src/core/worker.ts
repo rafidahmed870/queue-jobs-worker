@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { Cron } from "croner";
 import type { StorageAdapter } from "../types/storage.types.js";
 import type { WorkerOptions, WorkerStatus, Processor } from "../types/worker.types.js";
 import type { QueueOptions } from "../types/queue.types.js";
@@ -304,35 +305,39 @@ export class Worker {
 
   private async enqueueCronNext(job: Job<unknown>): Promise<void> {
     try {
-      // Resolve the next runAt using the cron expression.
-      // We depend on the optional "croner" or "cron-parser" package only if
-      // the user has actually configured a cron job.  To avoid a hard
-      // dependency we attempt a dynamic import; if neither package is
-      // available we fall back to a 1-minute interval and emit a warning.
-      let nextMs: number;
+      // Resolve the next scheduled run using the croner package.
+      // croner is a required dependency — if the expression is invalid or has
+      // no future occurrences we emit a worker:error and skip re-enqueue
+      // rather than silently falling back to a 1-minute interval.
+      let nextDate: Date | null;
 
       try {
-        // Use a computed specifier so TypeScript does not statically resolve
-        // "croner" — it is an optional peer dependency that may not be installed.
-        const specifier = "croner";
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const croner = (await import(/* @vite-ignore */ specifier)) as any;
-        const CronClass = croner.Cron ?? croner.default?.Cron ?? croner.default;
-        if (typeof CronClass === "function") {
-          const cronInstance = new CronClass(job.cron as string) as {
-            nextRun: () => Date | null;
-          };
-          const nextDate = cronInstance.nextRun();
-          nextMs = nextDate ? nextDate.getTime() : Date.now() + 60_000;
-        } else {
-          nextMs = Date.now() + 60_000;
-        }
-      } catch {
-        // croner not installed — fall back to a 1-minute interval.
-        nextMs = Date.now() + 60_000;
+        const cronInstance = new Cron(job.cron as string);
+        nextDate = cronInstance.nextRun();
+      } catch (cronErr) {
+        // Cron expression is invalid or croner itself threw.
+        const error =
+          cronErr instanceof Error
+            ? cronErr
+            : new Error(
+                `croner failed to initialize for expression "${job.cron as string}": ${String(cronErr)}`,
+              );
+        this.emitter.emit("worker:error", this.id, error);
+        return; // Do not re-enqueue — invalid expression should not produce a job.
       }
 
-      const runAt = new Date(nextMs).toISOString();
+      if (nextDate === null) {
+        // The cron schedule has no future occurrences (e.g. a bounded expression
+        // that has already elapsed). Emitting an error lets operators know the
+        // job will not recur rather than silently dropping it.
+        const error = new Error(
+          `Cron expression "${job.cron as string}" has no future occurrences — job "${job.id}" will not be re-enqueued`,
+        );
+        this.emitter.emit("worker:error", this.id, error);
+        return;
+      }
+
+      const runAt = nextDate.toISOString();
 
       await this.storage.enqueue({
         id: generateJobId(),

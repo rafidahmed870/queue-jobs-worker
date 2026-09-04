@@ -243,3 +243,232 @@ describe("Worker", () => {
     await worker.stop();
   });
 });
+
+describe("Worker — cron scheduling (issue #5)", () => {
+  let client: QueueClient;
+
+  afterEach(async () => {
+    if (client) await client.close();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test: invalid cron expression → worker:error emitted, no 60-second job
+  // ---------------------------------------------------------------------------
+
+  it("emits worker:error and does not re-enqueue on an invalid cron expression", async () => {
+    // Regression for issue #5: before the fix a croner load/init failure
+    // silently fell back to a 1-minute (60 000 ms) runAt, so invalid
+    // expressions would still produce a re-enqueued job.
+
+    const { InMemoryStorageAdapter } = await import("../src/storage/in-memory.adapter.js");
+    const { QueueEventEmitter } = await import("../src/events/emitter.js");
+    const { Worker } = await import("../src/core/worker.js");
+
+    const adapter = new InMemoryStorageAdapter();
+    await adapter.initialize();
+    const emitter = new QueueEventEmitter();
+    const processors = new Map();
+
+    const worker = new Worker(
+      "cron-invalid-test",
+      adapter,
+      emitter,
+      processors,
+      {},
+      { pollInterval: 50_000 },
+      {
+        concurrency: 1,
+        attempts: 1,
+        retryDelay: 0,
+        backoff: "fixed",
+        timeout: 5_000,
+        pollInterval: 50_000,
+        stalledInterval: 60_000,
+        lockDuration: 30_000,
+        rateLimit: undefined,
+      },
+    );
+
+    const workerErrors: Error[] = [];
+    emitter.on("worker:error", (_workerId, err) => {
+      workerErrors.push(err);
+    });
+
+    // Enqueue a job with an intentionally broken cron expression.
+    const raw = await adapter.enqueue({
+      id: "cron-invalid-job",
+      queue: "cron-invalid-test",
+      type: "task",
+      payload: {},
+      maxAttempts: 1,
+      retryDelay: 0,
+      backoff: "fixed",
+      timeout: 5_000,
+      priority: 0,
+      runAt: new Date(Date.now() - 1).toISOString(),
+      cron: "NOT A VALID CRON",
+    });
+
+    // Access the private method via type cast to test it in isolation.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (worker as any).enqueueCronNext({
+      id: raw.id,
+      _data: raw,
+      cron: raw.cron,
+      type: raw.type,
+      maxAttempts: raw.maxAttempts,
+      retryDelay: raw.retryDelay,
+      backoff: raw.backoff,
+      timeout: raw.timeout,
+      priority: raw.priority,
+    });
+
+    // Must have emitted exactly one worker:error.
+    expect(workerErrors).toHaveLength(1);
+
+    // The error message must describe the problem — NOT a generic fallback.
+    expect(workerErrors[0]!.message).not.toContain("60");
+
+    // Must NOT have re-enqueued a follow-up job (queue should still have only
+    // the original job, and it is still in its original status).
+    const jobs = await adapter.getJobs({ queue: "cron-invalid-test", limit: 100, offset: 0 });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.id).toBe("cron-invalid-job");
+
+    // Verify no job was scheduled ~60 seconds out (the old fallback behaviour).
+    const sixtySecondsFromNow = Date.now() + 55_000; // 5 s tolerance
+    const fallbackJob = jobs.find((j) => new Date(j.runAt).getTime() >= sixtySecondsFromNow);
+    expect(fallbackJob).toBeUndefined();
+
+    await adapter.close();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test: valid expression → runAt is NOT ~60 seconds (real schedule used)
+  // ---------------------------------------------------------------------------
+
+  it("schedules the next cron occurrence using the real expression, not a 60-second fallback", async () => {
+    const { InMemoryStorageAdapter } = await import("../src/storage/in-memory.adapter.js");
+    const { QueueEventEmitter } = await import("../src/events/emitter.js");
+    const { Worker } = await import("../src/core/worker.js");
+
+    const adapter = new InMemoryStorageAdapter();
+    await adapter.initialize();
+    const emitter = new QueueEventEmitter();
+    const processors = new Map();
+
+    const worker = new Worker(
+      "cron-valid-test",
+      adapter,
+      emitter,
+      processors,
+      {},
+      { pollInterval: 50_000 },
+      {
+        concurrency: 1,
+        attempts: 1,
+        retryDelay: 0,
+        backoff: "fixed",
+        timeout: 5_000,
+        pollInterval: 50_000,
+        stalledInterval: 60_000,
+        lockDuration: 30_000,
+        rateLimit: undefined,
+      },
+    );
+
+    const workerErrors: Error[] = [];
+    emitter.on("worker:error", (_workerId, err) => {
+      workerErrors.push(err);
+    });
+
+    // "0 2 * * *" = daily at 02:00 — next occurrence is always > 1 minute away.
+    const raw = await adapter.enqueue({
+      id: "cron-valid-job",
+      queue: "cron-valid-test",
+      type: "task",
+      payload: {},
+      maxAttempts: 1,
+      retryDelay: 0,
+      backoff: "fixed",
+      timeout: 5_000,
+      priority: 0,
+      runAt: new Date(Date.now() - 1).toISOString(),
+      cron: "0 2 * * *",
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (worker as any).enqueueCronNext({
+      id: raw.id,
+      _data: raw,
+      cron: raw.cron,
+      type: raw.type,
+      maxAttempts: raw.maxAttempts,
+      retryDelay: raw.retryDelay,
+      backoff: raw.backoff,
+      timeout: raw.timeout,
+      priority: raw.priority,
+    });
+
+    // No errors should have been emitted.
+    expect(workerErrors).toHaveLength(0);
+
+    // A second job should now exist — the re-enqueued next occurrence.
+    const jobs = await adapter.getJobs({ queue: "cron-valid-test", limit: 100, offset: 0 });
+    expect(jobs).toHaveLength(2);
+
+    const nextJob = jobs.find((j) => j.id !== "cron-valid-job");
+    expect(nextJob).toBeDefined();
+
+    // runAt must be more than 60 seconds in the future — proving the real
+    // cron expression was used rather than the old 1-minute fallback.
+    const runAtMs = new Date(nextJob!.runAt).getTime();
+    const sixtySecondsFromNow = Date.now() + 60_000;
+    expect(runAtMs).toBeGreaterThan(sixtySecondsFromNow);
+
+    // The next occurrence should also preserve the cron expression.
+    expect(nextJob!.cron).toBe("0 2 * * *");
+
+    await adapter.close();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test: croner error must not crash the worker process
+  // ---------------------------------------------------------------------------
+
+  it("does not crash the worker when enqueueCronNext encounters an error", async () => {
+    client = new QueueClient({ defaults: { pollInterval: 50 } });
+    const queue = client.createQueue("cron-no-crash");
+
+    const completed = vi.fn();
+    const workerErrors: Error[] = [];
+
+    client.on("job:completed", completed);
+    client.on("worker:error", (_id, err) => workerErrors.push(err));
+
+    // Register a processor for the cron job type.
+    queue.process("daily", async () => {
+      // Processor succeeds — enqueueCronNext will then run with an invalid
+      // expression and must emit worker:error without crashing the worker.
+    });
+
+    // Enqueue with a broken cron expression so enqueueCronNext will fail.
+    await queue.enqueue("daily", {}, { schedule: { cron: "BROKEN_EXPR" } });
+
+    const worker = queue.createWorker({ concurrency: 1 });
+
+    await sleep(500);
+
+    // The job itself must complete successfully.
+    expect(completed).toHaveBeenCalledOnce();
+
+    // A worker:error must have been emitted for the cron scheduling failure.
+    expect(workerErrors.length).toBeGreaterThan(0);
+
+    // The worker must still be running — the cron error must not have stopped it.
+    expect(worker.status).toBe("running");
+
+    await worker.stop();
+    expect(worker.status).toBe("stopped");
+  });
+});
