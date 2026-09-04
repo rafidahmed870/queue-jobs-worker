@@ -112,6 +112,75 @@ return job_id
 `;
 
 // ---------------------------------------------------------------------------
+// Lua — atomic stalled-job recovery (per job, compare-and-swap)
+//
+// The non-atomic read→decide→write pattern in the old recoverStalledJobs()
+// had a TOCTOU race: a worker could complete or renew its lock between the
+// read pipeline and the write pipeline, causing recovery to overwrite a valid
+// active job back to "waiting".
+//
+// This script closes that window by performing the validity re-check and the
+// state update as a single indivisible Redis command.  The caller passes the
+// lockExpiresAt and lockId it observed; the script re-reads those fields and
+// aborts if they differ (compare-and-swap).  This is the same pattern used
+// by BullMQ and Redlock for stale-lock detection.
+//
+// KEYS[1]  job hash key               e.g. "qjw:job:<id>"
+// KEYS[2]  active set                 e.g. "qjw:queue:<name>:active"
+// KEYS[3]  waiting sorted set         e.g. "qjw:queue:<name>:waiting"
+// ARGV[1]  job ID                     — member value for SREM / ZADD
+// ARGV[2]  expected lockExpiresAt     — caller's observed value
+// ARGV[3]  expected lockId            — caller's observed value
+// ARGV[4]  recovery timestamp (ISO)   — written to updatedAt
+// ARGV[5]  priority score (string)    — ZADD score (-priority → ZPOPMIN highest first)
+//
+// Returns 1 when the job was recovered, 0 when the read was stale (skipped).
+// ---------------------------------------------------------------------------
+
+const RECOVER_STALLED_LUA = `
+local job_key        = KEYS[1]
+local active_set     = KEYS[2]
+local waiting_zset   = KEYS[3]
+
+local job_id         = ARGV[1]
+local expected_exp   = ARGV[2]
+local expected_lock  = ARGV[3]
+local recovery_ts    = ARGV[4]
+local priority_score = tonumber(ARGV[5])
+
+-- Re-read the three guard fields in one atomic HMGET.
+local fields = redis.call('HMGET', job_key, 'lockExpiresAt', 'lockId', 'status')
+local current_exp    = fields[1] or ''
+local current_lock   = fields[2] or ''
+local current_status = fields[3] or ''
+
+-- Guard 1: job must still be active.
+-- If the worker already completed, failed, or moved to DLQ, skip.
+if current_status ~= 'active' then return 0 end
+
+-- Guard 2: lockId must not have changed.
+-- A different worker may have claimed the job after the original lock expired
+-- and before this script runs.
+if current_lock ~= expected_lock then return 0 end
+
+-- Guard 3: lockExpiresAt must be exactly what the caller observed.
+-- If the worker renewed its lock the timestamp will be later than observed;
+-- the CAS mismatch catches that without needing ISO→epoch conversion in Lua.
+if current_exp ~= expected_exp then return 0 end
+
+-- All guards passed — recover atomically.
+redis.call('HSET', job_key,
+  'status',        'waiting',
+  'lockId',        '',
+  'lockExpiresAt', '',
+  'updatedAt',     recovery_ts
+)
+redis.call('SREM', active_set,   job_id)
+redis.call('ZADD', waiting_zset, priority_score, job_id)
+return 1
+`;
+
+// ---------------------------------------------------------------------------
 // Serialisation helpers
 // ---------------------------------------------------------------------------
 
@@ -406,7 +475,18 @@ export class RedisStorageAdapter implements StorageAdapter {
   }
 
   // -------------------------------------------------------------------------
-  // Recover stalled jobs  (batched — one pipeline per stalled job)
+  // Recover stalled jobs  (atomic compare-and-swap per job via Lua)
+  //
+  // Previous implementation: two-phase read pipeline → write pipeline.
+  // Race condition: a worker could complete or renew its lock between the two
+  // phases, causing recovery to overwrite a legitimately-active job.
+  //
+  // Fix (issue #6): for each candidate job the RECOVER_STALLED_LUA script
+  // re-reads lockExpiresAt, lockId, and status atomically and only applies
+  // the recovery if all three still match what was observed in the read phase
+  // (compare-and-swap).  If the worker renewed or completed the job in the
+  // window between the read and the Lua call, the CAS mismatch causes the
+  // script to return 0 and the job is left untouched.
   // -------------------------------------------------------------------------
 
   async recoverStalledJobs(queue: string, now: string): Promise<string[]> {
@@ -414,40 +494,56 @@ export class RedisStorageAdapter implements StorageAdapter {
     const activeIds = await this.client.sMembers(k.active(queue));
     if (activeIds.length === 0) return [];
 
-    // Fetch lockExpiresAt and priority for all active jobs in a single pipeline.
+    // Phase 1 — read candidate fields.
+    // We fetch lockExpiresAt, lockId, and priority for all active jobs in one
+    // pipeline.  These values become the "expected" snapshot passed to the Lua
+    // CAS script.  If any of these values change before the Lua executes, the
+    // script will detect the mismatch and skip that job.
     const fetchPipeline = this.client.multi();
     for (const jobId of activeIds) {
-      fetchPipeline.hmGet(k.job(jobId), ["lockExpiresAt", "priority"]);
+      fetchPipeline.hmGet(k.job(jobId), ["lockExpiresAt", "lockId", "priority"]);
     }
     const fetchResults = await fetchPipeline.exec();
 
+    // Phase 2 — per-job atomic CAS via Lua.
+    // Each eval call is an independent atomic unit in Redis; no pipeline is
+    // needed here because the script itself guarantees atomicity per job.
     const recovered: string[] = [];
-    const recoverPipeline = this.client.multi();
+    const evalPromises: Promise<unknown>[] = [];
 
     for (let i = 0; i < activeIds.length; i++) {
       const jobId = activeIds[i] as string;
-      const fields = fetchResults[i] as unknown as [string | null, string | null] | null;
+      const fields = fetchResults[i] as unknown as
+        [string | null, string | null, string | null] | null;
       if (!fields) continue;
 
-      const [lockExpiresAt, priorityStr] = fields;
+      const [lockExpiresAt, lockId, priorityStr] = fields;
+
+      // Pre-filter: skip jobs whose lock has not yet expired according to the
+      // snapshot.  This avoids unnecessary Lua round-trips for healthy jobs.
       if (!lockExpiresAt) continue;
       if (new Date(lockExpiresAt).getTime() > nowMs) continue;
 
       const priority = Number(priorityStr ?? "0");
-      recoverPipeline.hSet(k.job(jobId), {
-        status: "waiting",
-        lockId: "",
-        lockExpiresAt: "",
-        updatedAt: now,
-      });
-      recoverPipeline.sRem(k.active(queue), jobId);
-      recoverPipeline.zAdd(k.waiting(queue), { score: -priority, value: jobId });
-      recovered.push(jobId);
+      const priorityScore = String(-priority); // negative → ZPOPMIN yields highest first
+
+      // The Lua script performs a CAS: it re-reads lockExpiresAt, lockId, and
+      // status atomically, aborts if anything has changed, and only then
+      // applies the recovery.  Returns 1 on recovery, 0 on stale skip.
+      const p = this.client
+        .eval(RECOVER_STALLED_LUA, {
+          keys: [k.job(jobId), k.active(queue), k.waiting(queue)],
+          arguments: [jobId, lockExpiresAt, lockId ?? "", now, priorityScore],
+        })
+        .then((result) => {
+          if (result === 1) recovered.push(jobId);
+        });
+
+      evalPromises.push(p);
     }
 
-    if (recovered.length > 0) {
-      await recoverPipeline.exec();
-    }
+    // Wait for all CAS scripts to finish before returning.
+    await Promise.all(evalPromises);
 
     return recovered;
   }

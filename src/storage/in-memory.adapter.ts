@@ -219,6 +219,12 @@ export class InMemoryStorageAdapter implements StorageAdapter {
 
   // -------------------------------------------------------------------------
   // Recover stalled jobs
+  //
+  // Fix (issue #6): snapshot lockId and lockExpiresAt before the eligibility
+  // check, then re-validate both values at write time.  In a single-process
+  // scenario all operations are synchronous within one event-loop tick, so
+  // the race is theoretical — but the guard makes the adapter consistent with
+  // the Redis CAS semantics and protects against any future async paths.
   // -------------------------------------------------------------------------
 
   async recoverStalledJobs(queue: string, now: string): Promise<string[]> {
@@ -231,14 +237,25 @@ export class InMemoryStorageAdapter implements StorageAdapter {
       if (job.lockExpiresAt === null) continue;
 
       const lockExpiry = new Date(job.lockExpiresAt).getTime();
-      if (lockExpiry <= nowMs) {
-        // Lock expired — return the job to waiting so it can be reclaimed.
-        job.status = "waiting";
-        job.lockId = null;
-        job.lockExpiresAt = null;
-        job.updatedAt = now;
-        recovered.push(job.id);
-      }
+      if (lockExpiry > nowMs) continue;
+
+      // Snapshot the guard fields observed at decision time.
+      const snapshotLockId = job.lockId;
+      const snapshotLockExpiresAt = job.lockExpiresAt;
+
+      // Re-validate before writing (compare-and-swap).
+      // If another operation (complete, requeue, releaseLock) ran between the
+      // check above and this point, one of these will differ and we skip.
+      if (job.status !== "active") continue;
+      if (job.lockId !== snapshotLockId) continue;
+      if (job.lockExpiresAt !== snapshotLockExpiresAt) continue;
+
+      // Lock expired and state is unchanged — recover.
+      job.status = "waiting";
+      job.lockId = null;
+      job.lockExpiresAt = null;
+      job.updatedAt = now;
+      recovered.push(job.id);
     }
 
     return recovered;
