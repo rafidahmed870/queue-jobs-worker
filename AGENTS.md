@@ -23,7 +23,7 @@ Core concepts:
 * Priority & Rate Limiting
 * Dead Letter Queue
 
-Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) before making architectural changes.
+Read [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) before making architectural changes.
 
 ---
 
@@ -34,8 +34,8 @@ Before modifying code:
 1. Inspect the relevant implementation.
 2. Understand existing abstractions.
 3. Check related tests.
-4. Follow [`RULES.md`](./RULES.md).
-5. Follow [`INSTRUCTIONS.md`](./INSTRUCTIONS.md).
+4. Follow [`RULES.md`](./docs/RULES.md).
+5. Follow [`INSTRUCTIONS.md`](./docs/INSTRUCTIONS.md).
 6. Make the smallest appropriate change.
 
 Do not redesign unrelated parts of the system.

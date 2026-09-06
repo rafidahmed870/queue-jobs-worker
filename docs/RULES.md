@@ -81,7 +81,7 @@ All contributions and architectural changes should follow these rules.
 
 ## 8. Configuration
 
-Configuration follows a layered precedence — more specific settings override broader defaults where supported. See [FEATURES.md → Layered Configuration](./FEATURES.md#layered-configuration).
+Configuration follows a layered precedence — more specific settings override broader defaults where supported. See [FEATURES.md → Layered Configuration](../FEATURES.md#layered-configuration).
 
 ---
 

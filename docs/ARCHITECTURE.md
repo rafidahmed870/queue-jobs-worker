@@ -8,7 +8,7 @@ It enables applications to execute asynchronous, time-consuming, or resource-int
 
 It is suitable for workloads such as email delivery, notifications, webhooks, file processing, media processing, report generation, and other asynchronous operations.
 
-For a full feature reference, see [FEATURES.md](./FEATURES.md).
+For a full feature reference, see [FEATURES.md](../FEATURES.md).
 
 The package does not implement business logic. Users provide job processors, while **QUEUE-JOBS-WORKER** manages queueing, persistence, execution, reliability, and worker lifecycle.
 
@@ -20,7 +20,7 @@ The primary goal is to provide reliable, fault-tolerant, scalable, and developer
 
 Key design properties: **reliability · consistency · safety · scalability · maintainability**.
 
-For the full feature set that satisfies these goals, see [FEATURES.md](./FEATURES.md).
+For the full feature set that satisfies these goals, see [FEATURES.md](../FEATURES.md).
 
 ---
 
@@ -133,7 +133,7 @@ const client = new QueueClient({
 });
 ```
 
-Configuration follows a layered hierarchy: client defaults → queue options → worker options → job options. See [FEATURES.md → Layered Configuration](./FEATURES.md#layered-configuration).
+Configuration follows a layered hierarchy: client defaults → queue options → worker options → job options. See [FEATURES.md → Layered Configuration](../FEATURES.md#layered-configuration).
 
 ### Queue Access
 
@@ -208,7 +208,7 @@ job_123
   └── Attempt 3
 ```
 
-Failed attempts are retained in the job's execution history. For the full `JobData` field reference, see [FEATURES.md → Job Identity & Metadata](./FEATURES.md#job-identity--metadata).
+Failed attempts are retained in the job's execution history. For the full `JobData` field reference, see [FEATURES.md → Job Identity & Metadata](../FEATURES.md#job-identity--metadata).
 
 ---
 
@@ -297,7 +297,7 @@ Active
       └──────► Active
 ```
 
-A retryable job returns to the queue as the **same job**, preserving its ID and failure history. When all attempts are exhausted it moves to the **Dead Letter Queue (DLQ)**. See [FEATURES.md → Job Lifecycle](./FEATURES.md#job-lifecycle) and [FEATURES.md → Dead Letter Queue](./FEATURES.md#dead-letter-queue).
+A retryable job returns to the queue as the **same job**, preserving its ID and failure history. When all attempts are exhausted it moves to the **Dead Letter Queue (DLQ)**. See [FEATURES.md → Job Lifecycle](../FEATURES.md#job-lifecycle) and [FEATURES.md → Dead Letter Queue](../FEATURES.md#dead-letter-queue).
 
 ---
 
@@ -372,7 +372,7 @@ Retry Delay / Backoff
 Requeue
 ```
 
-Each failed attempt is recorded in the job's failure history. When no attempts remain, the job moves to the DLQ. See [FEATURES.md → Retry & Backoff](./FEATURES.md#retry--backoff).
+Each failed attempt is recorded in the job's failure history. When no attempts remain, the job moves to the DLQ. See [FEATURES.md → Retry & Backoff](../FEATURES.md#retry--backoff).
 
 ---
 
@@ -395,7 +395,7 @@ Worker
        Requeue
 ```
 
-Recovered jobs are reattempted consistent with the at-least-once delivery model. See [FEATURES.md → Stalled-Job Recovery](./FEATURES.md#stalled-job-recovery).
+Recovered jobs are reattempted consistent with the at-least-once delivery model. See [FEATURES.md → Stalled-Job Recovery](../FEATURES.md#stalled-job-recovery).
 
 ---
 
@@ -419,7 +419,7 @@ Queue
 Worker
 ```
 
-Jobs must not become eligible before their scheduled execution time. See [FEATURES.md → Scheduling](./FEATURES.md#scheduling).
+Jobs must not become eligible before their scheduled execution time. See [FEATURES.md → Scheduling](../FEATURES.md#scheduling).
 
 ---
 
@@ -429,19 +429,19 @@ Jobs must not become eligible before their scheduled execution time. See [FEATUR
 
 **Rate limiting** restricts the number of jobs processed within a defined time window. When the limit is reached, eligible jobs stay queued until the window resets.
 
-See [FEATURES.md → Priority](./FEATURES.md#priority) and [FEATURES.md → Rate Limiting](./FEATURES.md#rate-limiting).
+See [FEATURES.md → Priority](../FEATURES.md#priority) and [FEATURES.md → Rate Limiting](../FEATURES.md#rate-limiting).
 
 ---
 
 ## Events
 
-The **Events** system exposes lifecycle events for jobs and workers, allowing applications to integrate their own logging and observability. See [FEATURES.md → Event System](./FEATURES.md#event-system).
+The **Events** system exposes lifecycle events for jobs and workers, allowing applications to integrate their own logging and observability. See [FEATURES.md → Event System](../FEATURES.md#event-system).
 
 ---
 
 ## Concurrency
 
-Concurrency controls the number of jobs processed simultaneously and may be configured at client, queue, or worker level. Concurrent workers coordinate through the storage and locking mechanisms to prevent duplicate job ownership. See [FEATURES.md → Workers & Concurrency](./FEATURES.md#workers--concurrency).
+Concurrency controls the number of jobs processed simultaneously and may be configured at client, queue, or worker level. Concurrent workers coordinate through the storage and locking mechanisms to prevent duplicate job ownership. See [FEATURES.md → Workers & Concurrency](../FEATURES.md#workers--concurrency).
 
 ---
 
@@ -464,19 +464,19 @@ Infrastructure and process-level scaling remain the responsibility of the deploy
 
 ## Graceful Shutdown
 
-Workers must support graceful shutdown: stop claiming new jobs, allow active jobs to finish within configured limits, release locks, and exit cleanly. Interrupted jobs remain recoverable via the failure-recovery system. See [FEATURES.md → Graceful Shutdown](./FEATURES.md#graceful-shutdown).
+Workers must support graceful shutdown: stop claiming new jobs, allow active jobs to finish within configured limits, release locks, and exit cleanly. Interrupted jobs remain recoverable via the failure-recovery system. See [FEATURES.md → Graceful Shutdown](../FEATURES.md#graceful-shutdown).
 
 ---
 
 ## Monitoring
 
-The package exposes queue, job, and worker states through events and query APIs that applications may use for observability. External monitoring infrastructure is outside the package's core responsibility. See [FEATURES.md → Event System](./FEATURES.md#event-system) and [FEATURES.md → Job Querying](./FEATURES.md#job-querying).
+The package exposes queue, job, and worker states through events and query APIs that applications may use for observability. External monitoring infrastructure is outside the package's core responsibility. See [FEATURES.md → Event System](../FEATURES.md#event-system) and [FEATURES.md → Job Querying](../FEATURES.md#job-querying).
 
 ---
 
 ## Security
 
-The package follows a secure-by-default approach: payloads are never logged, credentials stay in environment variables, and sensitive data is kept out of errors. Processor execution isolation is the responsibility of the deployment environment. See [FEATURES.md → Security Defaults](./FEATURES.md#security-defaults) and [SECURITY.md](./SECURITY.md).
+The package follows a secure-by-default approach: payloads are never logged, credentials stay in environment variables, and sensitive data is kept out of errors. Processor execution isolation is the responsibility of the deployment environment. See [FEATURES.md → Security Defaults](../FEATURES.md#security-defaults) and [SECURITY.md](../SECURITY.md).
 
 ---
 
