@@ -164,4 +164,74 @@ describe("InMemoryStorageAdapter", () => {
     expect(counts.waiting).toBe(1);
     expect(counts.active).toBe(1);
   });
+
+  it("renews an active lock for the owning worker", async () => {
+    await adapter.enqueue(baseInput());
+    await adapter.claim({
+      queue: "test",
+      lockId: "w1",
+      lockDuration: 10_000,
+      now: new Date().toISOString(),
+    });
+
+    const renewed = await adapter.renewLock("job-1", "w1", 20_000);
+    expect(renewed).toBe(true);
+
+    const job = await adapter.getJob("job-1");
+    expect(job!.lockExpiresAt).not.toBeNull();
+    const expiryTime = new Date(job!.lockExpiresAt!).getTime();
+    expect(expiryTime).toBeGreaterThan(Date.now() + 15_000);
+  });
+
+  it("fails renewLock if caller is not the lock owner or job is not active", async () => {
+    await adapter.enqueue(baseInput());
+    await adapter.claim({
+      queue: "test",
+      lockId: "w1",
+      lockDuration: 10_000,
+      now: new Date().toISOString(),
+    });
+
+    const wrongOwner = await adapter.renewLock("job-1", "w2", 20_000);
+    expect(wrongOwner).toBe(false);
+
+    await adapter.complete("job-1", "w1");
+    const nonActive = await adapter.renewLock("job-1", "w1", 20_000);
+    expect(nonActive).toBe(false);
+  });
+
+  it("prevents stale worker from completing, requeueing, or moving job to DLQ", async () => {
+    await adapter.enqueue(baseInput());
+    await adapter.claim({
+      queue: "test",
+      lockId: "w1",
+      lockDuration: 10_000,
+      now: new Date().toISOString(),
+    });
+
+    // Stale worker w2 tries to complete, requeue, or move to DLQ
+    await adapter.complete("job-1", "w2");
+    let job = await adapter.getJob("job-1");
+    expect(job!.status).toBe("active");
+    expect(job!.lockId).toBe("w1");
+
+    await adapter.requeue({
+      jobId: "job-1",
+      runAt: new Date().toISOString(),
+      error: "stale err",
+      attemptNumber: 1,
+      lockId: "w2",
+    });
+    job = await adapter.getJob("job-1");
+    expect(job!.status).toBe("active");
+
+    await adapter.moveToDlq({ jobId: "job-1", error: "stale err", attemptNumber: 1, lockId: "w2" });
+    job = await adapter.getJob("job-1");
+    expect(job!.status).toBe("active");
+
+    // Correct owner w1 completes job
+    await adapter.complete("job-1", "w1");
+    job = await adapter.getJob("job-1");
+    expect(job!.status).toBe("completed");
+  });
 });

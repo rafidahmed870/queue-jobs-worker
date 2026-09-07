@@ -48,6 +48,8 @@ export interface RequeueInput {
   stack?: string | undefined;
   /** 1-based attempt number that just failed (used to populate attempt history). */
   attemptNumber: number;
+  /** Optional lock ID to verify ownership before requeueing. */
+  lockId?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,8 @@ export interface MoveToDlqInput {
   stack?: string | undefined;
   /** 1-based attempt number that just failed (used to populate attempt history). */
   attemptNumber: number;
+  /** Optional lock ID to verify ownership before moving to DLQ. */
+  lockId?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,28 +124,43 @@ export interface StorageAdapter {
   claim<TPayload = unknown>(input: ClaimInput): Promise<JobData<TPayload> | null>;
 
   /**
-   * Mark a job as successfully completed and release its lock.
+   * Renew an active job lock.
+   *
+   * Must only succeed if the caller still owns the lock.
+   *
+   * Returns:
+   *  - true  => lock renewed
+   *  - false => ownership lost or job not active
    */
-  complete(jobId: string): Promise<void>;
+  renewLock(jobId: string, lockId: string, lockDuration: number): Promise<boolean>;
+
+  /**
+   * Mark a job as successfully completed and release its lock.
+   * If lockId is provided, verifies lock ownership before completing.
+   */
+  complete(jobId: string, lockId?: string): Promise<void>;
 
   /**
    * Requeue a failed job for another attempt (retry).
    * Records the failure in `attempts` history.
    * Must NOT create a new job identity.
+   * If input.lockId is provided, verifies lock ownership before requeueing.
    */
   requeue(input: RequeueInput): Promise<void>;
 
   /**
    * Move a permanently-failed job to the DLQ.
    * Sets status to `'dead'` and records the final failure.
+   * If input.lockId is provided, verifies lock ownership before moving to DLQ.
    */
   moveToDlq(input: MoveToDlqInput): Promise<void>;
 
   /**
    * Release the lock on a job without changing its status.
    * Used during graceful shutdown when a job cannot complete in time.
+   * If lockId is provided, verifies lock ownership before releasing.
    */
-  releaseLock(jobId: string): Promise<void>;
+  releaseLock(jobId: string, lockId?: string): Promise<void>;
 
   /**
    * Recover stalled jobs — jobs that are `active` but whose lock has expired.

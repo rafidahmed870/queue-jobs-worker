@@ -471,4 +471,43 @@ describe("Worker — cron scheduling (issue #5)", () => {
     await worker.stop();
     expect(worker.status).toBe("stopped");
   });
+
+  it("renews lock during execution so long-running processor is not reclaimed by another worker", async () => {
+    client = new QueueClient({
+      defaults: {
+        lockDuration: 200,
+        stalledInterval: 50,
+        pollInterval: 50,
+      },
+    });
+
+    const queue = client.createQueue("long-job-test", {
+      lockDuration: 200,
+      stalledInterval: 50,
+      pollInterval: 50,
+    });
+
+    const executionCount = vi.fn();
+
+    queue.process("long-job", async () => {
+      executionCount();
+      // Processor takes 600ms, which is 3x the lockDuration of 200ms
+      await sleep(600);
+    });
+
+    await queue.enqueue("long-job", { to: "user@example.com" });
+
+    // Start two workers on the same queue
+    const worker1 = queue.createWorker({ concurrency: 1 });
+    const worker2 = queue.createWorker({ concurrency: 1 });
+
+    // Wait 900ms for job processing to finish completely
+    await sleep(900);
+
+    // The job should only be processed ONCE by worker 1, not reclaimed by worker 2
+    expect(executionCount).toHaveBeenCalledOnce();
+
+    await worker1.stop();
+    await worker2.stop();
+  });
 });

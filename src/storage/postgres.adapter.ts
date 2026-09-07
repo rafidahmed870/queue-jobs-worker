@@ -274,17 +274,43 @@ export class PostgreSQLStorageAdapter implements StorageAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Renew lock
+  // -------------------------------------------------------------------------
+
+  async renewLock(jobId: string, lockId: string, lockDuration: number): Promise<boolean> {
+    const newLockExpiresAt = new Date(Date.now() + lockDuration).toISOString();
+    const res = await this.pool.query(
+      `UPDATE qjw_jobs
+       SET lock_expires_at = $1::timestamptz,
+           updated_at = NOW()
+       WHERE id = $2 AND status = 'active' AND lock_id = $3 AND lock_expires_at > NOW()`,
+      [newLockExpiresAt, jobId, lockId],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  // -------------------------------------------------------------------------
   // Complete
   // -------------------------------------------------------------------------
 
-  async complete(jobId: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE qjw_jobs
-       SET status = 'completed', lock_id = NULL, lock_expires_at = NULL,
-           completed_at = NOW(), updated_at = NOW()
-       WHERE id = $1`,
-      [jobId],
-    );
+  async complete(jobId: string, lockId?: string): Promise<void> {
+    if (lockId !== undefined) {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET status = 'completed', lock_id = NULL, lock_expires_at = NULL,
+             completed_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND status = 'active' AND lock_id = $2`,
+        [jobId, lockId],
+      );
+    } else {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET status = 'completed', lock_id = NULL, lock_expires_at = NULL,
+             completed_at = NOW(), updated_at = NOW()
+         WHERE id = $1`,
+        [jobId],
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -301,18 +327,33 @@ export class PostgreSQLStorageAdapter implements StorageAdapter {
       ...(input.stack !== undefined ? { stack: input.stack } : {}),
     };
 
-    await this.pool.query(
-      `UPDATE qjw_jobs
-       SET status         = 'waiting',
-           attempts_made  = attempts_made + 1,
-           attempts       = attempts || $1::jsonb,
-           run_at         = $2::timestamptz,
-           lock_id        = NULL,
-           lock_expires_at = NULL,
-           updated_at     = NOW()
-       WHERE id = $3`,
-      [JSON.stringify([attempt]), input.runAt, input.jobId],
-    );
+    if (input.lockId !== undefined) {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET status          = 'waiting',
+             attempts_made   = $1,
+             attempts        = attempts || $2::jsonb,
+             run_at          = $3::timestamptz,
+             lock_id         = NULL,
+             lock_expires_at = NULL,
+             updated_at      = NOW()
+         WHERE id = $4 AND status = 'active' AND lock_id = $5`,
+        [input.attemptNumber, JSON.stringify([attempt]), input.runAt, input.jobId, input.lockId],
+      );
+    } else {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET status         = 'waiting',
+             attempts_made  = $1,
+             attempts       = attempts || $2::jsonb,
+             run_at         = $3::timestamptz,
+             lock_id        = NULL,
+             lock_expires_at = NULL,
+             updated_at     = NOW()
+         WHERE id = $4`,
+        [input.attemptNumber, JSON.stringify([attempt]), input.runAt, input.jobId],
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -329,35 +370,55 @@ export class PostgreSQLStorageAdapter implements StorageAdapter {
       ...(input.stack !== undefined ? { stack: input.stack } : {}),
     };
 
-    await this.pool.query(
-      `UPDATE qjw_jobs
-       SET status          = 'dead',
-           attempts_made   = attempts_made + 1,
-           attempts        = attempts || $1::jsonb,
-           lock_id         = NULL,
-           lock_expires_at = NULL,
-           failed_at       = NOW(),
-           updated_at      = NOW()
-       WHERE id = $2`,
-      [JSON.stringify([attempt]), input.jobId],
-    );
+    if (input.lockId !== undefined) {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET status          = 'dead',
+             attempts_made   = $1,
+             attempts        = attempts || $2::jsonb,
+             lock_id         = NULL,
+             lock_expires_at = NULL,
+             failed_at       = NOW(),
+             updated_at      = NOW()
+         WHERE id = $3 AND status = 'active' AND lock_id = $4`,
+        [input.attemptNumber, JSON.stringify([attempt]), input.jobId, input.lockId],
+      );
+    } else {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET status          = 'dead',
+             attempts_made   = $1,
+             attempts        = attempts || $2::jsonb,
+             lock_id         = NULL,
+             lock_expires_at = NULL,
+             failed_at       = NOW(),
+             updated_at      = NOW()
+         WHERE id = $3`,
+        [input.attemptNumber, JSON.stringify([attempt]), input.jobId],
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
   // Release lock
   // -------------------------------------------------------------------------
 
-  async releaseLock(jobId: string): Promise<void> {
-    // Set lock_expires_at to NOW() (already-expired) rather than NULL.
-    // recoverStalledJobs() uses WHERE lock_expires_at <= $now — NULL comparisons
-    // in SQL always evaluate to NULL (not true), so a NULL value would leave the
-    // job permanently stuck in active status.
-    await this.pool.query(
-      `UPDATE qjw_jobs
-       SET lock_id = NULL, lock_expires_at = NOW(), updated_at = NOW()
-       WHERE id = $1`,
-      [jobId],
-    );
+  async releaseLock(jobId: string, lockId?: string): Promise<void> {
+    if (lockId !== undefined) {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET lock_id = NULL, lock_expires_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND status = 'active' AND lock_id = $2`,
+        [jobId, lockId],
+      );
+    } else {
+      await this.pool.query(
+        `UPDATE qjw_jobs
+         SET lock_id = NULL, lock_expires_at = NOW(), updated_at = NOW()
+         WHERE id = $1`,
+        [jobId],
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
