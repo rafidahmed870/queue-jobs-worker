@@ -137,11 +137,34 @@ export class InMemoryStorageAdapter implements StorageAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Renew lock
+  // -------------------------------------------------------------------------
+
+  async renewLock(jobId: string, lockId: string, lockDuration: number): Promise<boolean> {
+    const job = this.jobs.get(jobId);
+    if (!job) return false;
+    if (job.status !== "active" || job.lockId !== lockId) return false;
+
+    const nowMs = Date.now();
+    if (job.lockExpiresAt !== null && new Date(job.lockExpiresAt).getTime() <= nowMs) {
+      return false; // Lock already expired
+    }
+
+    job.lockExpiresAt = new Date(nowMs + lockDuration).toISOString();
+    job.updatedAt = new Date(nowMs).toISOString();
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
   // Complete
   // -------------------------------------------------------------------------
 
-  async complete(jobId: string): Promise<void> {
-    const job = this.requireJob(jobId);
+  async complete(jobId: string, lockId?: string): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    if (lockId !== undefined && (job.status !== "active" || job.lockId !== lockId)) {
+      return;
+    }
     const now = new Date().toISOString();
 
     job.status = "completed";
@@ -156,7 +179,11 @@ export class InMemoryStorageAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async requeue(input: RequeueInput): Promise<void> {
-    const job = this.requireJob(input.jobId);
+    const job = this.jobs.get(input.jobId);
+    if (!job) return;
+    if (input.lockId !== undefined && (job.status !== "active" || job.lockId !== input.lockId)) {
+      return;
+    }
     const now = new Date().toISOString();
 
     // Record this attempt in history using the canonical attempt number from input.
@@ -181,7 +208,11 @@ export class InMemoryStorageAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async moveToDlq(input: MoveToDlqInput): Promise<void> {
-    const job = this.requireJob(input.jobId);
+    const job = this.jobs.get(input.jobId);
+    if (!job) return;
+    if (input.lockId !== undefined && (job.status !== "active" || job.lockId !== input.lockId)) {
+      return;
+    }
     const now = new Date().toISOString();
 
     job.attempts.push({
@@ -204,9 +235,12 @@ export class InMemoryStorageAdapter implements StorageAdapter {
   // Release lock
   // -------------------------------------------------------------------------
 
-  async releaseLock(jobId: string): Promise<void> {
+  async releaseLock(jobId: string, lockId?: string): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job) return;
+    if (lockId !== undefined && (job.status !== "active" || job.lockId !== lockId)) {
+      return;
+    }
 
     const now = new Date().toISOString();
     job.lockId = null;

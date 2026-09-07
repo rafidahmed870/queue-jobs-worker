@@ -160,7 +160,7 @@ export class Worker {
     if (this.activeJobIds.size > 0) {
       await Promise.all(
         Array.from(this.activeJobIds).map((jobId) =>
-          this.storage.releaseLock(jobId).catch(() => {
+          this.storage.releaseLock(jobId, this.id).catch(() => {
             // Best-effort — storage may already be unavailable during shutdown.
           }),
         ),
@@ -232,7 +232,7 @@ export class Worker {
         now,
       );
       if (!allowed) {
-        await this.storage.releaseLock(raw.id);
+        await this.storage.releaseLock(raw.id, this.id);
         return false;
       }
     }
@@ -262,6 +262,20 @@ export class Worker {
     }
 
     let timeoutHandle: NodeJS.Timeout | null = null;
+    let lockRenewTimer: NodeJS.Timeout | null = null;
+
+    const lockRenewInterval = Math.max(100, Math.floor(this.config.lockDuration / 2));
+    lockRenewTimer = setInterval(async () => {
+      try {
+        const renewed = await this.storage.renewLock(job.id, this.id, this.config.lockDuration);
+        if (!renewed && lockRenewTimer) {
+          clearInterval(lockRenewTimer);
+          lockRenewTimer = null;
+        }
+      } catch {
+        // ignore transient renewal errors
+      }
+    }, lockRenewInterval);
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -275,7 +289,11 @@ export class Worker {
 
       // Success path.
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      await this.storage.complete(job.id);
+      if (lockRenewTimer) {
+        clearInterval(lockRenewTimer);
+        lockRenewTimer = null;
+      }
+      await this.storage.complete(job.id, this.id);
 
       const completedData = (await this.storage.getJob(job.id)) ?? job._data;
       this.emitter.emit("job:completed", completedData);
@@ -286,9 +304,17 @@ export class Worker {
       }
     } catch (err) {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (lockRenewTimer) {
+        clearInterval(lockRenewTimer);
+        lockRenewTimer = null;
+      }
       const error = err instanceof Error ? err : new Error(String(err));
       await this.handleFailure(job, error);
     } finally {
+      if (lockRenewTimer) {
+        clearInterval(lockRenewTimer);
+        lockRenewTimer = null;
+      }
       this.activeJobIds.delete(job.id);
       this.activeCount -= 1;
       // Signal drain waiter if we've reached zero active jobs.
@@ -378,6 +404,7 @@ export class Worker {
         runAt,
         error: error.message,
         attemptNumber,
+        lockId: this.id,
         ...(error.stack !== undefined && { stack: error.stack }),
       });
 
@@ -391,6 +418,7 @@ export class Worker {
         jobId: job.id,
         error: error.message,
         attemptNumber,
+        lockId: this.id,
         ...(error.stack !== undefined && { stack: error.stack }),
       });
 

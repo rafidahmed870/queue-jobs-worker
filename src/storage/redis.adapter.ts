@@ -181,6 +181,36 @@ return 1
 `;
 
 // ---------------------------------------------------------------------------
+// Lua — atomic lock renewal
+//
+// KEYS[1]  job hash key               e.g. "qjw:job:<id>"
+// ARGV[1]  lock ID                    (expected current owner)
+// ARGV[2]  new lockExpiresAt (ISO)
+// ARGV[3]  now (ISO string)
+//
+// Returns 1 when lock was renewed, 0 when ownership lost or job not active.
+// ---------------------------------------------------------------------------
+
+const RENEW_LOCK_LUA = `
+local job_key = KEYS[1]
+local lock_id = ARGV[1]
+local new_exp = ARGV[2]
+local now_iso = ARGV[3]
+
+local fields = redis.call('HMGET', job_key, 'status', 'lockId', 'lockExpiresAt')
+local status = fields[1] or ''
+local current_lock = fields[2] or ''
+local current_exp = fields[3] or ''
+
+if status ~= 'active' then return 0 end
+if current_lock ~= lock_id then return 0 end
+if current_exp == '' or current_exp <= now_iso then return 0 end
+
+redis.call('HSET', job_key, 'lockExpiresAt', new_exp, 'updatedAt', now_iso)
+return 1
+`;
+
+// ---------------------------------------------------------------------------
 // Serialisation helpers
 // ---------------------------------------------------------------------------
 
@@ -362,13 +392,34 @@ export class RedisStorageAdapter implements StorageAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Renew lock
+  // -------------------------------------------------------------------------
+
+  async renewLock(jobId: string, lockId: string, lockDuration: number): Promise<boolean> {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const newExpiresAt = new Date(nowMs + lockDuration).toISOString();
+
+    const res = await this.client.eval(RENEW_LOCK_LUA, {
+      keys: [k.job(jobId)],
+      arguments: [lockId, newExpiresAt, nowIso],
+    });
+
+    return Number(res) === 1;
+  }
+
+  // -------------------------------------------------------------------------
   // Complete
   // -------------------------------------------------------------------------
 
-  async complete(jobId: string): Promise<void> {
+  async complete(jobId: string, lockId?: string): Promise<void> {
     const now = new Date().toISOString();
     const hash = await this.client.hGetAll(k.job(jobId));
-    if (!hash) return;
+    if (!hash || Object.keys(hash).length === 0) return;
+
+    if (lockId !== undefined) {
+      if (hash["status"] !== "active" || hash["lockId"] !== lockId) return;
+    }
 
     const queue = hash["queue"] ?? "";
     const multi = this.client.multi();
@@ -391,7 +442,11 @@ export class RedisStorageAdapter implements StorageAdapter {
   async requeue(input: RequeueInput): Promise<void> {
     const now = new Date().toISOString();
     const hash = await this.client.hGetAll(k.job(input.jobId));
-    if (!hash) return;
+    if (!hash || Object.keys(hash).length === 0) return;
+
+    if (input.lockId !== undefined) {
+      if (hash["status"] !== "active" || hash["lockId"] !== input.lockId) return;
+    }
 
     const queue = hash["queue"] ?? "";
     const attempts: JobAttempt[] = JSON.parse(hash["attempts"] ?? "[]") as JobAttempt[];
@@ -430,7 +485,11 @@ export class RedisStorageAdapter implements StorageAdapter {
   async moveToDlq(input: MoveToDlqInput): Promise<void> {
     const now = new Date().toISOString();
     const hash = await this.client.hGetAll(k.job(input.jobId));
-    if (!hash) return;
+    if (!hash || Object.keys(hash).length === 0) return;
+
+    if (input.lockId !== undefined) {
+      if (hash["status"] !== "active" || hash["lockId"] !== input.lockId) return;
+    }
 
     const queue = hash["queue"] ?? "";
     const attempts: JobAttempt[] = JSON.parse(hash["attempts"] ?? "[]") as JobAttempt[];
@@ -462,7 +521,14 @@ export class RedisStorageAdapter implements StorageAdapter {
   // Release lock
   // -------------------------------------------------------------------------
 
-  async releaseLock(jobId: string): Promise<void> {
+  async releaseLock(jobId: string, lockId?: string): Promise<void> {
+    const hash = await this.client.hGetAll(k.job(jobId));
+    if (!hash || Object.keys(hash).length === 0) return;
+
+    if (lockId !== undefined) {
+      if (hash["status"] !== "active" || hash["lockId"] !== lockId) return;
+    }
+
     const now = new Date().toISOString();
     // Set lockExpiresAt to now (already-expired) rather than clearing it to an
     // empty string. recoverStalledJobs() skips entries where lockExpiresAt is
