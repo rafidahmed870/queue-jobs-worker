@@ -13,4 +13,4 @@ Testing
  Manually tested
 Related Issue
 
-Fixes #
+Fixes # (ISSUE_NUMBER)
