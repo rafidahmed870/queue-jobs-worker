@@ -14,7 +14,10 @@ import type { Job } from "../core/job.js";
  * Must resolve to indicate success.
  * Throwing (or rejecting) marks the job as failed for this attempt.
  */
-export type Processor<TPayload = unknown> = (job: Job<TPayload>) => Promise<void>;
+export type Processor<TPayload = unknown> = (
+  job: Job<TPayload>,
+  signal: AbortSignal,
+) => Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Worker options

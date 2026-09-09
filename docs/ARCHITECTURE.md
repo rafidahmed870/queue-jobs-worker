@@ -247,12 +247,12 @@ The package does not implement job-specific business logic.
 Users register processors for their job types.
 
 ```ts
-emails.process("send-email", async (job) => {
-  await sendEmail(job.data);
+emails.process("send-email", async (job, signal) => {
+  await sendEmail(job.data, { signal });
 });
 ```
 
-The worker executes the processor and manages its execution lifecycle.
+The worker executes the processor with an `AbortSignal` for cooperative cancellation on timeout and manages its execution lifecycle.
 
 ### Worker Concurrency
 

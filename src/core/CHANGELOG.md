@@ -2,6 +2,21 @@
 
 Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, and `id` utilities.
 
+## [1.0.3] — 2026-09-09
+
+### Fixed
+
+- **`Worker` — Job timeout cooperative cancellation via `AbortSignal`** ([#12](https://github.com/rafidahmed870/queue-jobs-worker/issues/12))
+
+  Previously, when a job attempt reached its configured `timeout`, the worker rejected the internal execution promise and marked the attempt as failed (or scheduled a retry), but the underlying processor `Promise` continued running in the background. This could lead to duplicate side effects when retries overlapped with timed-out attempts.
+
+  After the fix:
+
+  - `Processor` type signature is updated: `type Processor<TPayload = unknown> = (job: Job<TPayload>, signal: AbortSignal) => Promise<void>`.
+  - An `AbortController` is created for each job attempt.
+  - When job execution times out, the worker aborts the `AbortSignal` with a timeout error before rejecting the wrapper promise.
+  - User processors can monitor `signal.aborted` or pass `signal` to async operations (e.g. `fetch`, database queries, timers) for cooperative cancellation.
+
 ---
 
 ## [1.0.2] — 2026-09-05
@@ -87,6 +102,7 @@ Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, 
 ---
 
 <!-- Links -->
+[1.0.3]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0

@@ -240,18 +240,24 @@ If you want TypeScript type safety for `job.data`, pass a generic when creating 
 
 ## Processing Jobs
 
-Register a processor before creating or starting a worker:
+Register a processor before creating or starting a worker. Processors receive the `job` instance as well as an `AbortSignal` for cooperative cancellation when a job attempt times out:
 
 ```js
-queue.process("send-push", async (job) => {
+queue.process("send-push", async (job, signal) => {
   const { userId } = job.data;
 
-  await pushService.send(userId, "You have a new message");
+  // Pass signal to APIs that support cancellation (e.g. fetch, DB queries):
+  await pushService.send(userId, "You have a new message", { signal });
+
+  // Or check signal.aborted before performing expensive steps:
+  if (signal.aborted) return;
 
   // Return to mark the job complete.
   // Throw any error to trigger retry logic or DLQ handling.
 });
 ```
+
+> **Note on Timeout Cancellation**: In Node.js, asynchronous operations cannot be forcibly terminated from the outside. Processors should cooperate with cancellation by checking `signal.aborted` or forwarding `signal` to abortable APIs to ensure timed-out executions do not continue running in the background.
 
 See [FEATURES.md](./FEATURES.md) for the full `job` model and helper methods.
 
@@ -506,7 +512,7 @@ Creates a client using a custom storage backend.
 
 ### `queue.process(type, processor)`
 
-Registers an async processor for a job type.
+Registers an async processor for a job type. The processor signature is `async (job, signal) => ...`, where `signal` is an `AbortSignal` aborted when the per-attempt timeout is reached.
 
 ### `queue.createWorker(options?)`
 
