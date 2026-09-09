@@ -83,17 +83,20 @@ Helper methods: `isActive()`, `isCompleted()`, `isWaiting()`, `isDelayed()`, `is
 
 ## User-Defined Processors
 
-Business logic is kept entirely outside the library. Processors are async functions registered per job type:
+Business logic is kept entirely outside the library. Processors are async functions registered per job type that receive the `Job` instance and an `AbortSignal`:
 
 ```ts
-emails.process("send-email", async (job) => {
-  await sendEmail(job.data.to, job.data.subject);
+emails.process("send-email", async (job, signal) => {
+  await sendEmail(job.data.to, job.data.subject, { signal });
   // Return  → job marked completed
   // Throw   → job marked failed (triggers retry or DLQ)
 });
 ```
 
 Multiple job types can be registered on the same queue. Each type has its own processor function.
+
+### Cooperative Cancellation on Timeout
+When a per-attempt job `timeout` is reached, the worker aborts the `signal` associated with that execution attempt. Because Node.js cannot forcibly terminate running promises, processors must cooperate with cancellation by passing `signal` to abortable APIs or checking `signal.aborted` during long-running tasks.
 
 ---
 

@@ -261,6 +261,7 @@ export class Worker {
       return;
     }
 
+    const abortController = new AbortController();
     let timeoutHandle: NodeJS.Timeout | null = null;
     let lockRenewTimer: NodeJS.Timeout | null = null;
 
@@ -281,10 +282,12 @@ export class Worker {
       await new Promise<void>((resolve, reject) => {
         // Enforce per-attempt timeout.
         timeoutHandle = setTimeout(() => {
-          reject(new Error(`Job timed out after ${job.timeout}ms`));
+          const timeoutError = new Error(`Job timed out after ${job.timeout}ms`);
+          abortController.abort(timeoutError);
+          reject(timeoutError);
         }, job.timeout);
 
-        Promise.resolve(processor(job)).then(resolve, reject);
+        Promise.resolve(processor(job, abortController.signal)).then(resolve, reject);
       });
 
       // Success path.

@@ -511,3 +511,95 @@ describe("Worker — cron scheduling (issue #5)", () => {
     await worker2.stop();
   });
 });
+
+describe("Worker — job timeout cancellation (issue #12)", () => {
+  let client: QueueClient;
+
+  afterEach(async () => {
+    if (client) await client.close();
+  });
+
+  it("passes an AbortSignal as second argument to the processor", async () => {
+    client = new QueueClient({ defaults: { pollInterval: 30 } });
+    const queue = client.createQueue("signal-param-test");
+    let receivedSignal: AbortSignal | null = null;
+
+    queue.process("task", async (_job, signal) => {
+      receivedSignal = signal;
+    });
+
+    await queue.enqueue("task", {});
+    const worker = queue.createWorker();
+
+    await sleep(200);
+
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+    expect(receivedSignal!.aborted).toBe(false);
+
+    await worker.stop();
+  });
+
+  it("aborts the AbortSignal when job timeout is reached", async () => {
+    client = new QueueClient({ defaults: { pollInterval: 30 } });
+    const queue = client.createQueue("timeout-abort-test", {
+      timeout: 100,
+      attempts: 1,
+    });
+
+    let signalAborted = false;
+    let abortReason: Error | null = null;
+
+    queue.process("slow-job", async (_job, signal) => {
+      signal.addEventListener("abort", () => {
+        signalAborted = true;
+        abortReason = signal.reason as Error;
+      });
+
+      // Sleep longer than the 100ms timeout
+      await sleep(300);
+    });
+
+    await queue.enqueue("slow-job", {}, { timeout: 100, attempts: 1 });
+    const worker = queue.createWorker();
+
+    await sleep(350);
+
+    expect(signalAborted).toBe(true);
+    expect(abortReason).toBeDefined();
+    expect(abortReason!.message).toContain("Job timed out after 100ms");
+
+    await worker.stop();
+  });
+
+  it("allows processor to cooperatively cancel background work on timeout", async () => {
+    client = new QueueClient({ defaults: { pollInterval: 30 } });
+    const queue = client.createQueue("cooperative-cancel-test", {
+      timeout: 100,
+      attempts: 2,
+      retryDelay: 100,
+    });
+
+    let backgroundTaskFinished = false;
+
+    queue.process("slow-job", async (_job, signal) => {
+      for (let i = 0; i < 10; i++) {
+        if (signal.aborted) {
+          // Cooperative cancellation exit
+          return;
+        }
+        await sleep(50);
+      }
+      backgroundTaskFinished = true;
+    });
+
+    await queue.enqueue("slow-job", {}, { timeout: 100, attempts: 1 });
+    const worker = queue.createWorker();
+
+    // Wait past timeout (100ms) and potential loop duration (500ms)
+    await sleep(600);
+
+    expect(backgroundTaskFinished).toBe(false);
+
+    await worker.stop();
+  });
+});
