@@ -2,7 +2,7 @@
 
 # queue-jobs-worker
 
-A durable, TypeScript-first job queue for Node.js built for asynchronous work, retries, scheduling, and recovery.
+A durable, TypeScript-first job queue for Node.js built for asynchronous work, retries, scheduling, and recovery. It based on multiple storage adapter with postgresql, mysql, redis also in-memory support for dev/testing.
 
 <p align="center">
   <a href="https://www.npmjs.com/package/queue-jobs-worker">
@@ -86,85 +86,40 @@ If you are using TypeScript, you can optionally make the queue payload type-safe
 
 ## Supported Backends
 
-### Memory
-
-Use the in-memory backend for local development and tests. Data is not persisted across restarts.
+Pass `dialect` and `connectionString` to `QueueClient`. Call `await client.init()` to establish database connections and create required schema tables.
 
 ```js
-const client = new QueueClient();
-// or explicitly:
+// 1. In-Memory (Default for local development & tests, no persistence)
 const client = new QueueClient({ dialect: "memory" });
-```
 
-`init()` is effectively a no-op for this backend.
-
-### Redis
-
-```js
-const { QueueClient } = require("queue-jobs-worker");
-
+// 2. Redis (Supports standard redis://, TLS rediss://, and authentication)
 const client = new QueueClient({
   dialect: "redis",
-  connectionString: "redis://localhost:6379",
+  connectionString: process.env.REDIS_URL || "redis://localhost:6379",
 });
 
-await client.init();
-const jobs = client.createQueue("jobs");
-```
-
-With authentication:
-
-```js
-const client = new QueueClient({
-  dialect: "redis",
-  connectionString: "redis://:yourpassword@redis-host:6379/0",
-});
-
-await client.init();
-```
-
-With TLS:
-
-```js
-const client = new QueueClient({
-  dialect: "redis",
-  connectionString: "rediss://user:password@host:6380",
-});
-
-await client.init();
-```
-
-`init()` creates the Redis client, connects to the server, sends `PING`, and verifies the response is `PONG`.
-
-### PostgreSQL
-
-```js
-const { QueueClient } = require("queue-jobs-worker");
-
+// 3. PostgreSQL (Auto-creates required queue tables on init)
 const client = new QueueClient({
   dialect: "postgres",
-  connectionString: "postgresql://user:password@localhost:5432/mydb",
+  connectionString: process.env.POSTGRES_URL || "postgresql://user:password@localhost:5432/mydb",
 });
 
-await client.init();
-```
-
-`init()` verifies connectivity with `SELECT 1` and creates the queue tables if they do not already exist.
-
-### MySQL
-
-```js
-const { QueueClient } = require("queue-jobs-worker");
-
+// 4. MySQL (Auto-creates required queue tables on init)
 const client = new QueueClient({
   dialect: "mysql",
-  connectionString: "mysql://user:password@localhost:3306/mydb",
+  connectionString: process.env.MYSQL_URL || "mysql://user:password@localhost:3306/mydb",
 });
 
+// Initialize backend connection (Required for Redis, PostgreSQL, MySQL)
 await client.init();
 ```
 
-`init()` validates the connection and creates the required tables in the database.
+| Dialect | Connection Format | `client.init()` Behavior |
+|---|---|---|
+| `memory` | N/A | No-op (transient memory store) |
+| `redis` | `redis://...`, `rediss://...` (TLS), Auth URL | Connects & verifies with `PING` |
+| `postgres` | `postgresql://user:pass@host:5432/dbname` | `SELECT 1` check & creates schema |
+| `mysql` | `mysql://user:pass@host:3306/dbname` | Connection check & creates schema |
 
 ---
 
