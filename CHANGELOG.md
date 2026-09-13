@@ -4,6 +4,71 @@ All notable changes to **queue-jobs-worker** will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [1.0.4] — 2026-09-13
+
+### Core
+
+### Fixed
+
+- **`Worker` — Job timeout cooperative cancellation via `AbortSignal`** ([#12](https://github.com/rafidahmed870/queue-jobs-worker/issues/12))
+
+  Previously, when a job attempt reached its configured `timeout`, the worker rejected the internal execution promise and marked the attempt as failed (or scheduled a retry), but the underlying processor `Promise` continued running in the background. This could lead to duplicate side effects when retries overlapped with timed-out attempts.
+
+  After the fix:
+
+  - `Processor` type signature is updated: `type Processor<TPayload = unknown> = (job: Job<TPayload>, signal: AbortSignal) => Promise<void>`.
+  - An `AbortController` is created for each job attempt.
+  - When job execution times out, the worker aborts the `AbortSignal` with a timeout error before rejecting the wrapper promise.
+  - User processors can monitor `signal.aborted` or pass `signal` to async operations (e.g. `fetch`, database queries, timers) for cooperative cancellation.
+
+---
+
+### Events
+
+### Added
+
+- `QueueEventEmitter` — strongly-typed lifecycle event bus shared across all components.
+- Emits events for the full job lifecycle: enqueued, started, completed, failed, retrying, dead, stalled.
+- All event payloads fully typed via `events.types.ts`.
+
+---
+
+<!-- Links -->
+[1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0
+
+### Storage
+
+### Fixed
+
+- **`recoverStalledJobs()` race condition — stale recovery overwrites a live job** ([#6](https://github.com/rafidahmed870/queue-jobs-worker/issues/6))
+
+  The previous implementation used a two-phase read-then-write pattern:
+
+  1. A fetch pipeline read `lockExpiresAt` and `priority` for all active jobs.
+  2. A separate write pipeline recovered every job whose lock appeared expired.
+
+  Between those two phases a worker could complete the job, fail it, or renew
+  its lock.  The write pipeline had no knowledge of that change and would
+  unconditionally overwrite the job back to `"waiting"`, causing duplicate
+  processing or data loss.
+
+  **`RedisStorageAdapter`** — the write pipeline has been replaced with a
+  per-job Lua script (`RECOVER_STALLED_LUA`) that implements a
+  **compare-and-swap (CAS)** guard.  The script atomically re-reads
+  `lockExpiresAt`, `lockId`, and `status` from the hash and aborts if any of
+  the three values differ from what the caller observed in the read phase.
+  Because Redis executes Lua scripts as a single indivisible command, no
+  concurrent write can slip between the re-read and the state update.  The
+  pre-filter (skip jobs whose lock has not yet expired) is preserved as an
+  optimisation to avoid unnecessary Lua round-trips.
+
+  **`InMemoryStorageAdapter`** — all operations run within a single event-loop
+  tick so the race is theoretical, but an equivalent CAS guard has been added
+  for consistency: `lockId` and `lockExpiresAt` are snapshotted at decision
+  time and re-validated immediately before the write.  Any interleaving that
+  mutated those fields will cause the recovery to be skipped.
+
+---
 
 ## [1.0.3] — 2026-09-09
 
@@ -85,69 +150,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ---
 
 <!-- Links -->
+
+[1.0.4]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.0...v1.0.4
 [1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0
-
-### Storage
-
-### Fixed
-
-- **`recoverStalledJobs()` race condition — stale recovery overwrites a live job** ([#6](https://github.com/rafidahmed870/queue-jobs-worker/issues/6))
-
-  The previous implementation used a two-phase read-then-write pattern:
-
-  1. A fetch pipeline read `lockExpiresAt` and `priority` for all active jobs.
-  2. A separate write pipeline recovered every job whose lock appeared expired.
-
-  Between those two phases a worker could complete the job, fail it, or renew
-  its lock.  The write pipeline had no knowledge of that change and would
-  unconditionally overwrite the job back to `"waiting"`, causing duplicate
-  processing or data loss.
-
-  **`RedisStorageAdapter`** — the write pipeline has been replaced with a
-  per-job Lua script (`RECOVER_STALLED_LUA`) that implements a
-  **compare-and-swap (CAS)** guard.  The script atomically re-reads
-  `lockExpiresAt`, `lockId`, and `status` from the hash and aborts if any of
-  the three values differ from what the caller observed in the read phase.
-  Because Redis executes Lua scripts as a single indivisible command, no
-  concurrent write can slip between the re-read and the state update.  The
-  pre-filter (skip jobs whose lock has not yet expired) is preserved as an
-  optimisation to avoid unnecessary Lua round-trips.
-
-  **`InMemoryStorageAdapter`** — all operations run within a single event-loop
-  tick so the race is theoretical, but an equivalent CAS guard has been added
-  for consistency: `lockId` and `lockExpiresAt` are snapshotted at decision
-  time and re-validated immediately before the write.  Any interleaving that
-  mutated those fields will cause the recovery to be skipped.
-
----
-
-## [1.0.1] — 2026-08-31
-
-### Core
-
-### Fixed
-
-- **`Worker.stop()` — clarified `releaseLock()` behavior in shutdown comment** ([#1](https://github.com/rafidahmed870/queue-jobs-worker/issues/1))
-
-  The inline comment in `worker.ts` now correctly explains that `releaseLock()`
-  sets `lockExpiresAt` to an already-expired timestamp (not null/empty), so
-  `recoverStalledJobs()` on any worker will immediately reclaim the job on the
-  next stall-check cycle.
-
----
-
-### Events
-
-### Added
-
-- `QueueEventEmitter` — strongly-typed lifecycle event bus shared across all components.
-- Emits events for the full job lifecycle: enqueued, started, completed, failed, retrying, dead, stalled.
-- All event payloads fully typed via `events.types.ts`.
-
----
-
-<!-- Links -->
-
 [1.0.3]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/rafidahmed870/queue-jobs-worker/compare/v1.0.1...v1.0.2
 [1.0.0]: https://github.com/rafidahmed870/queue-jobs-worker/releases/tag/v1.0.0
