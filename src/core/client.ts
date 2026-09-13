@@ -61,6 +61,8 @@ export class QueueClient {
   private readonly queues = new Map<string, Queue<unknown>>();
   private initialised = false;
   private closed = false;
+  /** True when the adapter was supplied via {@link withAdapter}; init() skips resolveAdapter() in that case. */
+  private _customAdapter = false;
 
   constructor(options: QueueClientOptions = {}) {
     this.defaults = { ...HARD_DEFAULTS, ...options.defaults };
@@ -107,8 +109,10 @@ export class QueueClient {
   async init(): Promise<void> {
     if (this.initialised) return;
 
-    // Build the real adapter (lazy import keeps optional peer deps optional).
-    this._storage = await this.resolveAdapter();
+    if (!this._customAdapter) {
+      // Build the real adapter (lazy import keeps optional peer deps optional).
+      this._storage = await this.resolveAdapter();
+    }
 
     await this._storage.initialize();
     this.initialised = true;
@@ -254,6 +258,7 @@ export class QueueClient {
   ): QueueClient {
     const client = new QueueClient(options);
     client._storage = adapter;
+    client._customAdapter = true;
     return client;
   }
 }

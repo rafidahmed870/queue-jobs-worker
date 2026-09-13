@@ -2,6 +2,23 @@
 
 Changes to the core module: `QueueClient`, `Queue`, `Job`, `Worker`, `backoff`, and `id` utilities.
 
+## [1.0.4] — 2026-09-13
+
+### Fixed
+
+- **`QueueClient.withAdapter()` — preserves the supplied adapter after `init()`** ([#13](https://github.com/rafidahmed870/queue-jobs-worker/issues/13))
+
+  Previously, the `QueueClient` internally wrapped the provided adapter in a `QueueStorage` proxy without preserving the original instance. This caused issues where custom adapter implementations (and their state/memoization) were not retained after calling `client.init()`, contrary to expectations.
+
+  After the fix:
+
+  - `QueueClient.withAdapter()` now assigns the supplied adapter directly to the internal `_storage` field instead of wrapping it in `QueueStorage`.
+  - The storage layer remains the original user-supplied adapter instance.
+  - `init()` still calls `storage.initialize()` exactly once and ensures the idempotency of the call.
+  - `client._storage` now holds the original adapter, matching user expectations and ensuring that custom adapter logic is preserved across the client lifecycle.
+
+---
+
 ## [1.0.3] — 2026-09-09
 
 ### Fixed
